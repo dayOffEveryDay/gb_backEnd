@@ -3,9 +3,9 @@ spring:
     name: gb-backend
 
   datasource:
-    url: jdbc:mysql://localhost:3306/gb_db?useSSL=false&serverTimezone=Asia/Taipei&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://localhost:3306/gbc?useSSL=false&serverTimezone=Asia/Taipei&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:password}
+    password: ${GBC_DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -27,8 +27,8 @@ spring:
       client:
         registration:
           line:
-            client-id: ${LINE_CLIENT_ID:your-line-client-id}
-            client-secret: ${LINE_CLIENT_SECRET:your-line-client-secret}
+            client-id: ${GBC_LINE_CHANNEL_ID}
+            client-secret: ${GBC_LINE_CHANNEL_SECRET}
             scope: profile, openid, email
             redirect-uri: "{baseUrl}/login/oauth2/code/line"
             authorization-grant-type: authorization_code
