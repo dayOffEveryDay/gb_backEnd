@@ -22,27 +22,25 @@ spring:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
-  security:
-    oauth2:
-      client:
-        registration:
-          line:
-            client-id: ${GBC_LINE_CHANNEL_ID}
-            client-secret: ${GBC_LINE_CHANNEL_SECRET}
-            scope: profile, openid, email
-            redirect-uri: "{baseUrl}/login/oauth2/code/line"
-            authorization-grant-type: authorization_code
-            client-name: Line
-        provider:
-          line:
-            authorization-uri: https://access.line.me/oauth2/v2.1/authorize
-            token-uri: https://api.line.me/oauth2/v2.1/token
-            user-info-uri: https://api.line.me/v2/profile
-            user-name-attribute: userId
 
+# 👇 將 Line 的設定抽出來，不要讓 Spring Security 去自動攔截
+line:
+  api:
+    client-id: ${GBC_LINE_CHANNEL_ID}
+    client-secret: ${GBC_LINE_CHANNEL_SECRET}
+    token-uri: https://api.line.me/oauth2/v2.1/token
+    user-info-uri: https://api.line.me/v2/profile
+    redirect-uri: "http://localhost:3000/login/callback" # ⚠️ 這裡要填你 React 前端接收 Line callback 的網址
 server:
   port: 8080
-
+application:
+  security:
+    jwt:
+      # 這是一組隨機生成的 256-bit Base64 字串，千萬不要外流，也不要隨便改，否則所有人的 Token 都會失效！
+      # 你可以用線上工具生成一組新的，長度至少要 32 個字元轉 Base64。
+      secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      # Token 過期時間：這裡設定為 7 天 (7 * 24 * 60 * 60 * 1000 毫秒)
+      expiration: 2592000000
 logging:
   level:
     com.costco.gb: DEBUG
