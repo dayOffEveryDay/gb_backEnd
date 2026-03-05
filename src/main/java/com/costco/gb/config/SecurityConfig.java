@@ -1,4 +1,4 @@
-package com.costco.backend.config;
+package com.costco.gb.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
