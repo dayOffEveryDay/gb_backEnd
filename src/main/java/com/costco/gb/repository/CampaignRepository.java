@@ -18,7 +18,9 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             LocalDateTime now,
             Pageable pageable
     );
-
+    // 不指定門市，查詢所有特定狀態且未過期的單
+    Page<Campaign> findByStatusAndExpireTimeAfter(
+            String status, LocalDateTime now, Pageable pageable);
     // 團主個人頁面：查詢某位團主發起的所有合購單 (依建立時間倒序)
     Page<Campaign> findByHostIdOrderByCreatedAtDesc(Long hostId, Pageable pageable);
 

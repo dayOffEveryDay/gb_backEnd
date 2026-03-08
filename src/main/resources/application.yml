@@ -11,7 +11,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false #需要檢查語法再改 true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
@@ -39,9 +39,12 @@ application:
       # 這是一組隨機生成的 256-bit Base64 字串，千萬不要外流，也不要隨便改，否則所有人的 Token 都會失效！
       # 你可以用線上工具生成一組新的，長度至少要 32 個字元轉 Base64。
       secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
-      # Token 過期時間：這裡設定為 7 天 (7 * 24 * 60 * 60 * 1000 毫秒)
+      # Token 過期時間：這裡設定為 30 天 (30 * 24 * 60 * 60 * 1000 毫秒)
       expiration: 2592000000
 logging:
   level:
     com.costco.gb: DEBUG
     org.springframework.security: INFO
+  pattern:
+    # 自訂 Log 格式，加入 [%X{traceId}]
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] [%X{traceId}] %-40.40logger{39} : %m%n"
