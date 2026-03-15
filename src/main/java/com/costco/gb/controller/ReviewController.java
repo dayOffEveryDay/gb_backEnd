@@ -1,0 +1,34 @@
+package com.costco.gb.controller;
+
+import com.costco.gb.dto.request.CreateReviewRequest;
+import com.costco.gb.service.ReviewService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/v1/reviews")
+@RequiredArgsConstructor
+public class ReviewController {
+
+    private final ReviewService reviewService;
+
+    @PostMapping
+    public ResponseEntity<?> createReview(@RequestBody CreateReviewRequest request) {
+
+        // 從 Token 取出當前使用者 ID (評價者)
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long reviewerId = Long.parseLong(userIdStr);
+
+        // 呼叫 Service
+        reviewService.createReview(reviewerId, request);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "評價成功！感謝您的回饋。"
+        ));
+    }
+}

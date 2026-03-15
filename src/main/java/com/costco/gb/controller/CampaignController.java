@@ -1,11 +1,16 @@
 package com.costco.gb.controller;
 
+import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
 import com.costco.gb.service.CampaignService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import com.costco.gb.dto.request.JoinCampaignRequest;
+import org.springframework.web.bind.annotation.PathVariable;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/campaigns")
@@ -23,4 +28,58 @@ public class CampaignController {
         Page<CampaignSummaryResponse> response = campaignService.getActiveCampaigns(storeId, page, size);
         return ResponseEntity.ok(response);
     }
+
+    @PostMapping
+    public ResponseEntity<?> createCampaign(@RequestBody CreateCampaignRequest request) {
+
+        // ✨ 從 Token 攔截器中拿出剛剛解析好的 userId
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long hostId = Long.parseLong(userIdStr);
+
+        // 呼叫 Service 執行開團
+        campaignService.createCampaign(hostId, request);
+
+        // 回傳成功訊息
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "合購單發起成功！"
+        ));
+    }
+    @PostMapping("/{id}/join")
+    public ResponseEntity<?> joinCampaign(
+            @PathVariable("id") Long campaignId,
+            @RequestBody JoinCampaignRequest request
+    ) {
+        // 從 Token 取出當前使用者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
+
+        // 呼叫 Service
+        campaignService.joinCampaign(userId, campaignId, request);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "成功加入合購！"
+        ));
+    }
+
+    @PostMapping("/{id}/withdraw")
+    public ResponseEntity<?> withdrawCampaign(@PathVariable("id") Long campaignId) {
+
+        // 從 Token 攔截器中拿出當前使用者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
+
+        // 呼叫 Service 執行退出
+        campaignService.withdrawCampaign(userId, campaignId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "您已成功退出合購，相關紀錄已更新。"
+        ));
+    }
+
+
+
+
 }

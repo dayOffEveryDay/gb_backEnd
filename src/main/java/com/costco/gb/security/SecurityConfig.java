@@ -41,6 +41,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 【完全公開的 API】(permitAll)
                         .requestMatchers("/api/v1/auth/line").permitAll() // Line 登入不需要 Token
+                        .requestMatchers("/api/v1/auth/dev-login").permitAll() // Line 重新登入不需要 Token todo 完成要刪掉
                         .requestMatchers("/api/v1/system/**").permitAll() // 系統資料(門市/分類/節日)大家都能看
 
                         // 【選擇性公開的 API】(視你的業務邏輯而定)
