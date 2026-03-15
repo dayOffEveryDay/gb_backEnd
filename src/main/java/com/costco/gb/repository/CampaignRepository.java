@@ -44,4 +44,8 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             "WHERE c.status = 'OPEN' AND c.expireTime < :now")
     int updateExpiredCampaignsStatus(@Param("now") LocalDateTime now);
 
+    // 找出面交時間已經過了指定時間，但狀態還卡在 OPEN 或 FULL 的幽靈單
+    @Query("SELECT c FROM Campaign c WHERE c.status IN ('OPEN', 'FULL') AND c.meetupTime < :timeoutLimit")
+    List<Campaign> findGhostedCampaigns(@Param("timeoutLimit") LocalDateTime timeoutLimit);
+
 }

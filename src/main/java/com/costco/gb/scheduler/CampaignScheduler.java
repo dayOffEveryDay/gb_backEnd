@@ -1,5 +1,6 @@
 package com.costco.gb.scheduler;
 import com.costco.gb.repository.CampaignRepository;
+import com.costco.gb.service.CampaignService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -14,6 +15,7 @@ import java.time.LocalDateTime;
 public class CampaignScheduler {
 
     private final CampaignRepository campaignRepository;
+    private final CampaignService campaignService; // 注入 Service
 
     /*
      * TODO: [架構優化]
@@ -34,5 +36,11 @@ public class CampaignScheduler {
         if (updatedCount > 0) {
             log.info("清道夫任務執行完畢：已將 {} 筆過期的合購單狀態更新為 FAILED", updatedCount);
         }
+    }
+    // 新增：每小時的第 30 分鐘去巡邏一次有沒有幽靈單
+    @Scheduled(cron = "0 30 * * * *")
+    public void huntGhostedCampaigns() {
+        log.info("👻 啟動幽靈獵人排程：開始掃描團主放鳥的合購單...");
+        campaignService.processGhostedCampaigns();
     }
 }

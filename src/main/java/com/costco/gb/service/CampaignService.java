@@ -22,6 +22,8 @@ import com.costco.gb.entity.Participant;
 import com.costco.gb.repository.ParticipantRepository;
 import com.costco.gb.dto.request.JoinCampaignRequest;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -121,15 +123,16 @@ public class CampaignService {
     @Transactional
     public void joinCampaign(Long userId, Long campaignId, JoinCampaignRequest request) {
 
-        // 1. 基本防呆檢查
+        // 1. 基本防呆檢查 (保持不變)
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
-        // 👇 拿現在的時間跟合購單的到期時間比對
-        if (campaign.getExpireTime().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("來不及啦！這筆合購單已經過了截止時間囉。");
-        }
+
         if (!"OPEN".equals(campaign.getStatus())) {
             throw new RuntimeException("手腳太慢啦！此合購單已滿單或關閉。");
+        }
+
+        if (campaign.getExpireTime().isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("來不及啦！這筆合購單已經過了截止時間囉。");
         }
 
         if (campaign.getHost().getId().equals(userId)) {
@@ -140,40 +143,42 @@ public class CampaignService {
             throw new RuntimeException("認購數量必須大於 0");
         }
 
-        // 2. 防連點：檢查是否已經參加過
-        if (participantRepository.findByCampaignIdAndUserId(campaignId, userId).isPresent()) {
-            throw new RuntimeException("您已經參加過這團了，請勿重複點擊！");
-        }
-
-        // 3. 🛡️ 核心防禦：原子性扣庫存
+        // 2. 🛡️ 核心防禦：原子性扣庫存 (先扣合購單的庫存，確保高併發下不會超賣)
         int updatedRows = campaignRepository.decrementQuantity(campaignId, request.getQuantity());
-
-        // 如果 updatedRows 是 0，代表條件不成立 (庫存不足，或是狀態變了)
         if (updatedRows == 0) {
             throw new RuntimeException("剩餘數量不足。請確認認購數量或是是否已滿團。");
         }
 
-        // 4. 建立認購明細
-        User user = userRepository.getReferenceById(userId); // 使用 getReferenceById 節省一次 DB 查詢
-        Participant participant = Participant.builder()
-                .campaign(campaign)
-                .user(user)
-                .quantity(request.getQuantity())
-                .status("JOINED")
-                .build();
-        participantRepository.save(participant);
+        // 3. ✨ 魔法修改區：檢查是否已經參加過？
+        Optional<Participant> optionalParticipant = participantRepository.findByCampaignIdAndUserId(campaignId, userId);
 
-        // 5. 檢查是否滿單 (滿單則自動更改狀態)
-        // 因為前面已經扣除成功，我們把目前的數量減去請求數量，看看是不是剛好歸零
+        if (optionalParticipant.isPresent()) {
+            // 情況 A：已經參加過了，我們幫他「追加數量」
+            Participant existingParticipant = optionalParticipant.get();
+            existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
+            participantRepository.save(existingParticipant);
+            log.info("User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
+                    userId, campaignId, request.getQuantity(), existingParticipant.getQuantity());
+        } else {
+            // 情況 B：第一次參加，建立全新的明細
+            User user = userRepository.getReferenceById(userId);
+            Participant newParticipant = Participant.builder()
+                    .campaign(campaign)
+                    .user(user)
+                    .quantity(request.getQuantity())
+                    .status("JOINED")
+                    .build();
+            participantRepository.save(newParticipant);
+            log.info("User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
+        }
+
+        // 4. 檢查是否滿單 (滿單則自動更改狀態)
         int remaining = campaign.getAvailableQuantity() - request.getQuantity();
         if (remaining == 0) {
             campaign.setStatus("FULL");
-            campaignRepository.save(campaign); // Hibernate 會幫我們 UPDATE 狀態
+            campaignRepository.save(campaign);
             log.info("合購單 {} 已達滿單狀態！", campaignId);
-            // TODO: 未來在這裡觸發 WebSocket 或推播通知給團主和所有團員
         }
-
-        log.info("User {} 成功認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
     }
     @Transactional
     public void withdrawCampaign(Long userId, Long campaignId) {
@@ -193,6 +198,9 @@ public class CampaignService {
 
         if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
             throw new RuntimeException("此合購單已進入交易階段或已結束，無法退出！請直接聯繫團主。");
+        }
+        if (LocalDateTime.now().isAfter(campaign.getExpireTime())) {
+            throw new RuntimeException("合購單已過截止時間，無法單方面退出！若有緊急狀況請私訊團主。");
         }
 
         // 3. 變更參與明細狀態為「已取消」
@@ -216,5 +224,107 @@ public class CampaignService {
                 userId, campaignId, participant.getQuantity(), user.getParticipantCancelCount());
 
         // TODO: 未來可在這裡觸發推播 (Notification)，通知團主有人跳車了
+    }
+    // ==========================================
+    // 🚚 團主專用：宣告已面交 (轉為 DELIVERED)
+    // ==========================================
+    @Transactional
+    public void deliverCampaign(Long userId, Long campaignId) {
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 1. 權限檢查：只有團主可以按
+        if (!campaign.getHost().getId().equals(userId)) {
+            throw new RuntimeException("權限不足：只有團主可以宣告已面交！");
+        }
+
+        // 2. 狀態檢查：必須是 OPEN 或 FULL 才能轉為面交
+        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
+            throw new RuntimeException("此合購單狀態不正確，無法更改為「已面交」！");
+        }
+
+        // 3. 防呆：如果根本沒半個人上車，不能按面交 (請他直接取消)
+        long joinedCount = participantRepository.countByCampaignIdAndStatus(campaignId, "JOINED");
+        if (joinedCount == 0) {
+            throw new RuntimeException("目前沒有任何團員參與，無法進行面交，請直接取消合購單。");
+        }
+
+        // 4. 更改狀態
+        campaign.setStatus("DELIVERED");
+        campaignRepository.save(campaign);
+        log.info("團主 {} 已將合購單 {} 狀態更改為 DELIVERED (待團員確認收貨)", userId, campaignId);
+
+        // TODO: 未來可在此推播通知所有團員「團主已發貨/面交，請記得點擊確認收貨」
+    }
+
+    // ==========================================
+    // ✅ 團員專用：確認收貨 (並檢查是否整單 COMPLETED)
+    // ==========================================
+    @Transactional
+    public void confirmReceipt(Long userId, Long campaignId) {
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 1. 狀態檢查：團主必須先按了「已面交」
+        if (!"DELIVERED".equals(campaign.getStatus())) {
+            throw new RuntimeException("團主尚未宣告已面交，暫時無法確認收貨！");
+        }
+
+        // 2. 取得團員明細
+        Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, userId)
+                .orElseThrow(() -> new RuntimeException("您並未參加此合購單！"));
+
+        if (!"JOINED".equals(participant.getStatus())) {
+            throw new RuntimeException("您的訂單狀態不正確或已取消，無法確認收貨！");
+        }
+
+        // 3. 將該團員的明細狀態改為「已確認 (CONFIRMED)」
+        participant.setStatus("CONFIRMED");
+        participantRepository.save(participant);
+        log.info("團員 {} 已確認收到合購單 {} 的商品", userId, campaignId);
+
+        // 4. 🌟 終極判斷：是不是所有人都拿到了？
+        // 我們去算還有沒有人的狀態停留在 'JOINED' (代表還沒按確認)
+        long remainingJoined = participantRepository.countByCampaignIdAndStatus(campaignId, "JOINED");
+
+        if (remainingJoined == 0) {
+            // 所有人都確認了，這張單功德圓滿！
+            campaign.setStatus("COMPLETED");
+            campaignRepository.save(campaign);
+            log.info("🎉 合購單 {} 的所有團員皆已確認收貨，訂單正式 COMPLETED！", campaignId);
+
+            // TODO: 未來可在此時發送推播通知，提醒雙方可以開始互給「評價 (Review)」了！
+        }
+    }
+    // ==========================================
+    // 👻 系統專用：處理團主人間蒸發的幽靈單
+    // ==========================================
+    @Transactional
+    public void processGhostedCampaigns() {
+        LocalDateTime timeoutLimit = LocalDateTime.now().minusHours(24);
+        List<Campaign> ghostedCampaigns = campaignRepository.findGhostedCampaigns(timeoutLimit);
+
+        if (ghostedCampaigns.isEmpty()) {
+            return;
+        }
+
+        for (Campaign campaign : ghostedCampaigns) {
+            // 1. 合購單標記為團主放鳥
+            campaign.setStatus("HOST_NO_SHOW");
+
+            // 2. 嚴懲團主！重扣 10 分信用分
+            User host = campaign.getHost();
+            int newScore = Math.max(0, host.getCreditScore() - 10);
+            host.setCreditScore(newScore);
+            userRepository.save(host);
+
+            // 3. 🕊️ 真正釋放團員的地方！直接呼叫 Repository 的批次更新方法
+            int releasedCount = participantRepository.cancelAllByCampaignId(campaign.getId());
+
+            log.warn("🚨 抓到幽靈團主！合購單 {} 強制結案。團主信用扣 10 分。共釋放了 {} 名無辜團員！",
+                    campaign.getId(), releasedCount);
+        }
+
+        campaignRepository.saveAll(ghostedCampaigns);
     }
 }

@@ -45,6 +45,7 @@ public class CampaignController {
                 "message", "合購單發起成功！"
         ));
     }
+
     @PostMapping("/{id}/join")
     public ResponseEntity<?> joinCampaign(
             @PathVariable("id") Long campaignId,
@@ -79,7 +80,33 @@ public class CampaignController {
         ));
     }
 
+    // 團主宣告已面交
+    @PostMapping("/{id}/deliver")
+    public ResponseEntity<?> deliverCampaign(@PathVariable("id") Long campaignId) {
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
 
+        campaignService.deliverCampaign(userId, campaignId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "已成功更改為待確認狀態，請等待團員點擊收貨。"
+        ));
+    }
+
+    // 團員確認收貨
+    @PostMapping("/{id}/confirm")
+    public ResponseEntity<?> confirmReceipt(@PathVariable("id") Long campaignId) {
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
+
+        campaignService.confirmReceipt(userId, campaignId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "您已確認收貨！感謝您的參與。"
+        ));
+    }
 
 
 }
