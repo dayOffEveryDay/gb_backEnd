@@ -327,4 +327,58 @@ public class CampaignService {
 
         campaignRepository.saveAll(ghostedCampaigns);
     }
+    // ==========================================
+    // 💣 團主專用：主動取消合購單 (包含階梯式懲罰機制)
+    // ==========================================
+    @Transactional
+    public void cancelCampaignByHost(Long userId, Long campaignId) {
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 1. 身分核對：只有團主自己可以按
+        if (!campaign.getHost().getId().equals(userId)) {
+            throw new RuntimeException("權限不足：只有團主可以取消此合購單！");
+        }
+
+        // 2. 狀態核對：已經面交或結案的不能取消
+        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
+            throw new RuntimeException("合購單已進入交易階段或已結束，無法取消！");
+        }
+
+        // 3. 結算懲罰：清點是不是已經有無辜團員上車了？
+        long joinedCount = participantRepository.countByCampaignIdAndStatus(campaignId, "JOINED");
+
+        if (joinedCount > 0) {
+            User host = campaign.getHost();
+            int penalty = 0;
+            String penaltyReason = "";
+
+            // 💡 核心亮點：根據狀態決定懲罰力道
+            if ("FULL".equals(campaign.getStatus())) {
+                penalty = 5;
+                penaltyReason = "已成團 (FULL)";
+            } else if ("OPEN".equals(campaign.getStatus())) {
+                penalty = 2;
+                penaltyReason = "未成團 (OPEN)";
+            }
+
+            // 執行扣分 (最低扣到 0 分)
+            int newScore = Math.max(0, host.getCreditScore() - penalty);
+            host.setCreditScore(newScore);
+            userRepository.save(host);
+
+            // 釋放所有被放鳥的團員 (呼叫 Repository 的批次更新)
+            int releasedCount = participantRepository.cancelAllByHost(campaignId);
+
+            log.info("團主 {} 主動取消了【{}】的合購單 {}，共有 {} 人受影響。扣除 {} 分，剩餘信用分 {}",
+                    userId, penaltyReason, campaignId, releasedCount, penalty, newScore);
+        } else {
+            // 沒人上車，和平落幕，完全不扣分
+            log.info("團主 {} 取消了無人參與的合購單 {}", userId, campaignId);
+        }
+
+        // 4. 最終將這張單設為取消狀態
+        campaign.setStatus("CANCELLED");
+        campaignRepository.save(campaign);
+    }
 }

@@ -1,6 +1,7 @@
 package com.costco.gb.repository;
 
 import com.costco.gb.entity.Participant;
+import io.lettuce.core.dynamic.annotation.Param;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -25,4 +26,9 @@ public interface ParticipantRepository extends JpaRepository<Participant, Long> 
     @Modifying
     @Query("UPDATE Participant p SET p.status = 'CANCELLED_BY_SYSTEM' WHERE p.campaign.id = :campaignId AND p.status = 'JOINED'")
     int cancelAllByCampaignId(Long campaignId);
+    // 團主取消時，釋放所有團員並標記原因
+    @Modifying
+    @Query("UPDATE Participant p SET p.status = 'CANCELLED_BY_HOST' WHERE p.campaign.id = :campaignId AND p.status = 'JOINED'")
+    int cancelAllByHost(@Param("campaignId") Long campaignId);
+
 }

@@ -3,6 +3,7 @@ package com.costco.gb.controller;
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
 import com.costco.gb.service.CampaignService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -49,7 +50,7 @@ public class CampaignController {
     @PostMapping("/{id}/join")
     public ResponseEntity<?> joinCampaign(
             @PathVariable("id") Long campaignId,
-            @RequestBody JoinCampaignRequest request
+            @Valid @RequestBody JoinCampaignRequest request
     ) {
         // 從 Token 取出當前使用者 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -107,6 +108,18 @@ public class CampaignController {
                 "message", "您已確認收貨！感謝您的參與。"
         ));
     }
+    // 團主主動取消合購單
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<?> cancelCampaign(@PathVariable("id") Long campaignId) {
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
 
+        campaignService.cancelCampaignByHost(userId, campaignId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "合購單已成功取消。若有團員已加入，您的信用分數將會受到相應的扣除。"
+        ));
+    }
 
 }
