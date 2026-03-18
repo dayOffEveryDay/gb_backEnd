@@ -91,7 +91,7 @@
 | `meetup_location` | VARCHAR | | | 預計面交地點 |
 | `meetup_time` | DATETIME | | NULL | 預計面交時間 |
 | `expire_time` | DATETIME | INDEX | NULL | 單據失效/流局時間 |
-| `status` | VARCHAR | INDEX | 'OPEN' | 狀態 (OPEN, FULL, COMPLETED, CANCEL_PENDING, CANCELLED, EXPIRED) |
+| `status` | VARCHAR | INDEX | 'OPEN' | 狀態 (OPEN, FULL, COMPLETED, CANCEL_PENDING, CANCELLED, EXPIRED, DELIVERED) |
 | `blame_user_id` | BIGINT | FK (users.id) | NULL | 若取消，歸咎於哪位會員 (記點用) |
 | `cancel_reason` | VARCHAR | | NULL | 取消原因說明 |
 
