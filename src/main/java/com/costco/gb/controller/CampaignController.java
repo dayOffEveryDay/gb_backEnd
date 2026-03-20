@@ -23,15 +23,17 @@ public class CampaignController {
     @GetMapping
     public ResponseEntity<Page<CampaignSummaryResponse>> getCampaigns(
             @RequestParam(required = false) Integer storeId,
-            @RequestParam(defaultValue = "0") int page,   // 預設第 0 頁
-            @RequestParam(defaultValue = "10") int size   // 預設每頁 10 筆
-    ) {
-        Page<CampaignSummaryResponse> response = campaignService.getActiveCampaigns(storeId, page, size);
+            @RequestParam(required = false) Integer categoryId, // 新增分類
+            @RequestParam(required = false) String keyword,     // 新增關鍵字
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        Page<CampaignSummaryResponse> response = campaignService.getActiveCampaigns(storeId, categoryId, keyword, page, size);
         return ResponseEntity.ok(response);
     }
 
     @PostMapping
-    public ResponseEntity<?> createCampaign(@RequestBody CreateCampaignRequest request) {
+    public ResponseEntity<?> createCampaign(@ModelAttribute CreateCampaignRequest request) {
 
         // ✨ 從 Token 攔截器中拿出剛剛解析好的 userId
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

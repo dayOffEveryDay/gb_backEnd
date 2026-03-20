@@ -21,7 +21,10 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-
+  servlet:
+    multipart:
+      max-file-size: 15MB      # 單一檔案最大允許 15MB (夠容納大部分手機直出照片)
+      max-request-size: 50MB   # 整個 Request (最多3張圖+文字) 最大允許 50MB
 
 # 👇 將 Line 的設定抽出來，不要讓 Spring Security 去自動攔截
 line:

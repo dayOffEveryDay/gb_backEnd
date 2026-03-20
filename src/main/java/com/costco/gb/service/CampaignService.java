@@ -13,6 +13,7 @@ import com.costco.gb.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -21,9 +22,14 @@ import org.springframework.stereotype.Service;
 import com.costco.gb.entity.Participant;
 import com.costco.gb.repository.ParticipantRepository;
 import com.costco.gb.dto.request.JoinCampaignRequest;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -35,26 +41,24 @@ public class CampaignService {
     private final StoreRepository storeRepository;
     private final CategoryRepository categoryRepository;
     private final ParticipantRepository participantRepository;
+    private final String UPLOAD_DIR = "uploads/campaigns/";
 
-    public Page<CampaignSummaryResponse> getActiveCampaigns(Integer storeId, int page, int size) {
+    // 把參數補上 categoryId 和 keyword
+    public Page<CampaignSummaryResponse> getActiveCampaigns(Integer storeId, Integer categoryId, String keyword, int page, int size) {
 
         // 1. 設定分頁與排序 (依建立時間倒序，越新的在越上面)
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        LocalDateTime now = LocalDateTime.now();
-        Page<Campaign> campaignPage;
 
-        // 2. 判斷是否有傳入門市 ID 進行過濾
-        if (storeId != null) {
-            campaignPage = campaignRepository.findByStoreIdAndStatusAndExpireTimeAfter(
-                    storeId, "OPEN", now, pageable);
-        } else {
-            campaignPage = campaignRepository.findByStatusAndExpireTimeAfter(
-                    "OPEN", now, pageable);
-        }
+        // 2. 呼叫強大的動態查詢 (取代原本冗長的 if-else)
+        Page<Campaign> campaignPage = campaignRepository.findCampaignsWithFilters(
+                storeId, categoryId, keyword, pageable);
 
         // 3. 將 Entity 轉換為 DTO 回傳
         return campaignPage.map(this::mapToSummaryResponse);
     }
+
+
+
     @Transactional
     public void createCampaign(Long hostId, CreateCampaignRequest request) {
 
@@ -73,37 +77,90 @@ public class CampaignService {
         Category category = categoryRepository.findById(request.getCategoryId())
                 .orElseThrow(() -> new RuntimeException("找不到指定的分類"));
 
-        // 3. 建立 Campaign 實體
-        Campaign campaign = Campaign.builder()
-                .host(host)
-                .store(store)
-                .category(category)
-                .scenarioType(request.getScenarioType())
-                .itemName(request.getItemName())
-                .itemImageUrl(request.getItemImageUrl())
-                .pricePerUnit(request.getPricePerUnit())
-                .totalQuantity(request.getTotalQuantity())
-                .availableQuantity(request.getTotalQuantity()) // 💡 關鍵：初始剩餘數量 = 總數量
-                .meetupLocation(request.getMeetupLocation())
-                .meetupTime(request.getMeetupTime())
-                .expireTime(request.getExpireTime())
-                .status("OPEN") // 狀態預設為招募中
-                .build();
+        // 3. 🖼️ 處理圖片上傳 (生成 UUID 檔名並存入本地)
+        List<String> savedFileNames = new ArrayList<>();
+        File uploadDir = new File(UPLOAD_DIR);
+        if (!uploadDir.exists()) {
+            uploadDir.mkdirs(); // 如果資料夾不存在就自動建立
+        }
 
-        // 4. 寫入資料庫
-        campaignRepository.save(campaign);
+        try {
+            List<MultipartFile> images = request.getImages();
+            if (images != null && !images.isEmpty()) {
+                if (images.size() > 3) {
+                    throw new RuntimeException("最多只能上傳 3 張圖片喔！");
+                }
 
-        // TODO: V2 進階版，我們要在這裡把 availableQuantity 寫入 Redis，準備迎接高併發搶單！
+                for (MultipartFile file : images) {
+                    if (!file.isEmpty()) {
+                        // 取得原本的副檔名 (例如 .jpg, .png)
+                        String originalFilename = file.getOriginalFilename();
+                        String extension = (originalFilename != null && originalFilename.contains("."))
+                                ? originalFilename.substring(originalFilename.lastIndexOf("."))
+                                : ".jpg"; // 預設副檔名
 
-        log.info("User {} 成功發起了合購單: {}", hostId, campaign.getItemName());
+                        // 生成不會重複的 UUID 檔名
+                        String newFileName = UUID.randomUUID().toString() + extension;
+
+                        // 將檔案實體存入伺服器硬碟
+                        File destinationFile = new File(uploadDir, newFileName);
+//                        file.transferTo(destinationFile);
+                        // 🌟 核心魔法：使用 Thumbnailator 在存檔時直接壓縮為 1080p
+                        // (取代原本的 file.transferTo(destinationFile);)
+                        Thumbnails.of(file.getInputStream())
+                                .size(1080, 1080)        // 強制限制最大長寬為 1080，會自動等比例縮放
+                               // .outputQuality(0.85)     // 設定畫質為 85%，肉眼看不出差異，但檔案會變超小
+                                .toFile(destinationFile);
+
+                        savedFileNames.add(newFileName);
+                    }
+                }
+            }
+
+            // 將 List 轉換成以逗號分隔的字串，準備存入資料庫
+            String imageUrlsString = String.join(",", savedFileNames);
+
+            // 4. 建立 Campaign 實體
+            Campaign campaign = Campaign.builder()
+                    .host(host)
+                    .store(store)
+                    .category(category)
+                    .scenarioType(request.getScenarioType())
+                    .itemName(request.getItemName())
+                    .imageUrls(imageUrlsString) // 💡 存入 UUID 圖片字串
+                    .pricePerUnit(request.getPricePerUnit())
+                    .totalQuantity(request.getTotalQuantity())
+                    .availableQuantity(request.getTotalQuantity()) // 初始剩餘數量 = 總數量
+                    .meetupLocation(request.getMeetupLocation())
+                    .meetupTime(request.getMeetupTime())
+                    .expireTime(request.getExpireTime())
+                    .status("OPEN") // 狀態預設為招募中
+                    .build();
+
+            // 5. 寫入資料庫
+            campaignRepository.save(campaign);
+            // TODO: V2 進階版，我們要在這裡把 availableQuantity 寫入 Redis，準備迎接高併發搶單！
+            // (未來實作提示：redisTemplate.opsForValue().set("campaign:stock:" + campaign.getId(), String.valueOf(campaign.getAvailableQuantity())); )
+            log.info("User {} 成功發起了合購單: {}", hostId, campaign.getItemName());
+
+        } catch (Exception e) {
+            // 🚨 6. 失敗退場機制：如果資料庫寫入失敗，把剛剛存進硬碟的圖片通通刪掉！
+            for (String fileName : savedFileNames) {
+                File fileToDelete = new File(UPLOAD_DIR + fileName);
+                if (fileToDelete.exists()) {
+                    fileToDelete.delete();
+                }
+            }
+            log.error("建單發生錯誤，已清理殘留的圖片檔案: {}", e.getMessage());
+            throw new RuntimeException("發起合購單失敗：" + e.getMessage());
+        }
     }
-
     // 輔助方法：Entity 轉 DTO
     private CampaignSummaryResponse mapToSummaryResponse(Campaign campaign) {
         return CampaignSummaryResponse.builder()
                 .id(campaign.getId())
                 .itemName(campaign.getItemName())
-                .itemImageUrl(campaign.getItemImageUrl())
+                .itemImageUrl(campaign.getImageUrls())
                 .pricePerUnit(campaign.getPricePerUnit())
                 .totalQuantity(campaign.getTotalQuantity())
                 .availableQuantity(campaign.getAvailableQuantity())

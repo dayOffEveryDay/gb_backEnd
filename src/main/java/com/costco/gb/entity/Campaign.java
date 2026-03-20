@@ -30,8 +30,8 @@ public class Campaign extends BaseEntity {
     @Column(name = "item_name", nullable = false)
     private String itemName;
 
-    @Column(name = "item_image_url", length = 512)
-    private String itemImageUrl;
+    @Column(length = 1000)
+    private String imageUrls;// 存放格式："img1.jpg,img2.jpg,img3.jpg"
 
     private Integer pricePerUnit;
 

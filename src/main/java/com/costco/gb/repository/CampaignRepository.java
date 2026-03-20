@@ -26,6 +26,17 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     // 團主個人頁面：查詢某位團主發起的所有合購單 (依建立時間倒序)
     Page<Campaign> findByHostIdOrderByCreatedAtDesc(Long hostId, Pageable pageable);
 
+    // 支援動態條件的超強大查詢 (如果參數傳 null，該條件就會自動被忽略)
+    @Query("SELECT c FROM Campaign c WHERE " +
+            "(:storeId IS NULL OR c.store.id = :storeId) AND " +
+            "(:categoryId IS NULL OR c.category.id = :categoryId) AND " +
+            "(:keyword IS NULL OR c.itemName LIKE %:keyword%) AND " +
+            "c.status IN ('OPEN', 'FULL')") // 首頁通常只顯示還在進行中的單
+    Page<Campaign> findCampaignsWithFilters(
+            @Param("storeId") Integer storeId,
+            @Param("categoryId") Integer categoryId,
+            @Param("keyword") String keyword,
+            Pageable pageable);
 
     @Modifying
     @Query("UPDATE Campaign c SET c.availableQuantity = c.availableQuantity - :quantity " +
@@ -47,5 +58,20 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     // 找出面交時間已經過了指定時間，但狀態還卡在 OPEN 或 FULL 的幽靈單
     @Query("SELECT c FROM Campaign c WHERE c.status IN ('OPEN', 'FULL') AND c.meetupTime < :timeoutLimit")
     List<Campaign> findGhostedCampaigns(@Param("timeoutLimit") LocalDateTime timeoutLimit);
+
+    // 找出超過指定時間 (如 3 個月前)，且已經不再活動的歷史合購單
+    @Query("SELECT c FROM Campaign c WHERE c.meetupTime < :timeLimit AND c.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'HOST_NO_SHOW')")
+    List<Campaign> findOldCampaignsToCleanup(@Param("timeLimit") LocalDateTime timeLimit);
+
+
+    // 🧹 大掃除專用：找出超過 3 個月、已結案/失敗，且「還有圖片沒清掉」的歷史合購單
+    @Query("SELECT c FROM Campaign c WHERE c.meetupTime < :timeLimit AND c.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'HOST_NO_SHOW') AND c.imageUrls IS NOT NULL AND c.imageUrls != ''")
+    List<Campaign> findOldCampaignsWithImagesToCleanup(@Param("timeLimit") LocalDateTime timeLimit);
+
+    // 🧹 找出需要瘦身的舊單 (排除已經壓縮過的 _thumb)
+    @Query("SELECT c FROM Campaign c WHERE c.meetupTime < :timeLimit " +
+            "AND c.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'HOST_NO_SHOW') " +
+            "AND c.imageUrls IS NOT NULL AND c.imageUrls NOT LIKE '%_thumb%'")
+    List<Campaign> findOldCampaignsForImageCompression(@Param("timeLimit") LocalDateTime timeLimit);
 
 }

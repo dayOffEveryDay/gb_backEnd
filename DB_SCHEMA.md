@@ -76,24 +76,24 @@
 ## 🛒 3. 合購與認購核心 (Campaigns & Orders)
 
 ### 3.1 `campaigns` (開團主表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `host_id` | BIGINT | FK (users.id), INDEX| | 開團者 ID |
-| `category_id` | INT | FK (categories.id) | | 商品分類 ID |
-| `store_id` | INT | FK (stores.id), INDEX | | 關聯門市 ID |
-| `scenario_type` | VARCHAR | | | 開團情境 (INSTANT, SCHEDULED) |
-| `item_name` | VARCHAR | | | 商品名稱 |
-| `item_image_url` | VARCHAR | | | 現場照片 S3 連結 |
-| `price_per_unit` | INT | | | 預估單份金額 |
-| `total_quantity` | INT | | | 總共分出數量 |
-| `available_quantity`| INT | | | 剩餘可認購數量 (與 Redis 同步) |
-| `meetup_location` | VARCHAR | | | 預計面交地點 |
-| `meetup_time` | DATETIME | | NULL | 預計面交時間 |
-| `expire_time` | DATETIME | INDEX | NULL | 單據失效/流局時間 |
-| `status` | VARCHAR | INDEX | 'OPEN' | 狀態 (OPEN, FULL, COMPLETED, CANCEL_PENDING, CANCELLED, EXPIRED, DELIVERED) |
-| `blame_user_id` | BIGINT | FK (users.id) | NULL | 若取消，歸咎於哪位會員 (記點用) |
-| `cancel_reason` | VARCHAR | | NULL | 取消原因說明 |
+| 欄位名稱                 | 型態 | 鍵值 / 約束 | 預設值 | 說明                                                                        |
+|:---------------------| :--- | :--- | :--- |:--------------------------------------------------------------------------|
+| `id`                 | BIGINT | PK, Auto Inc. | |                                                                           |
+| `host_id`            | BIGINT | FK (users.id), INDEX| | 開團者 ID                                                                    |
+| `category_id`        | INT | FK (categories.id) | | 商品分類 ID                                                                   |
+| `store_id`           | INT | FK (stores.id), INDEX | | 關聯門市 ID                                                                   |
+| `scenario_type`      | VARCHAR | | | 開團情境 (INSTANT, SCHEDULED)                                                 |
+| `item_name`          | VARCHAR | | | 商品名稱                                                                      |
+| `image_urls`         | VARCHAR | | | 現場商品圖片檔名(多張以逗號分隔)                                                                      |
+| `price_per_unit`     | INT | | | 預估單份金額                                                                    |
+| `total_quantity`     | INT | | | 總共分出數量                                                                    |
+| `available_quantity` | INT | | | 剩餘可認購數量 (與 Redis 同步)                                                      |
+| `meetup_location`    | VARCHAR | | | 預計面交地點                                                                    |
+| `meetup_time`        | DATETIME | | NULL | 預計面交時間                                                                    |
+| `expire_time`        | DATETIME | INDEX | NULL | 單據失效/流局時間                                                                 |
+| `status`             | VARCHAR | INDEX | 'OPEN' | 狀態 (OPEN, FULL, COMPLETED, CANCEL_PENDING, CANCELLED, EXPIRED, DELIVERED) |
+| `blame_user_id`      | BIGINT | FK (users.id) | NULL | 若取消，歸咎於哪位會員 (記點用)                                                         |
+| `cancel_reason`      | VARCHAR | | NULL | 取消原因說明                                                                    |
 
 ### 3.2 `participants` (認購明細表)
 | 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
