@@ -69,11 +69,13 @@
 ### 2. 合購活動相關 (CampaignController)
 
 #### 2.1 取得合購單列表
-*   **功能**：取得所有活躍中的合購單列表，可依門市篩選，並支援分頁。
+*   **功能**：取得所有活躍中的合購單列表，可依門市、分類、關鍵字篩選，並支援分頁。
 *   **端點**：`/api/v1/campaigns`
 *   **方法**：`GET`
 *   **請求參數**：
     *   `storeId` (Integer, 可選): 門市 ID，用於篩選特定門市的合購單。
+    *   `categoryId` (Integer, 可選): 商品分類 ID，用於篩選特定分類的合購單。
+    *   `keyword` (String, 可選): 關鍵字，用於搜尋商品名稱。
     *   `page` (int, 可選): 頁碼，預設為 `0`。
     *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
 *   **回應 (application/json)**：
@@ -130,35 +132,25 @@
             *   `creditScore` (Integer): 團主信用分數。
 
 #### 2.2 發起合購單
-*   **功能**：使用者發起一個新的合購活動。
+*   **功能**：使用者發起一個新的合購活動，可上傳多張圖片。
 *   **端點**：`/api/v1/campaigns`
 *   **方法**：`POST`
 *   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求體 (application/json)**：
-    ```json
-    {
-        "storeId": 1,
-        "categoryId": 10,
-        "scenarioType": "INSTANT",
-        "itemName": "好市多自有品牌衛生紙",
-        "itemImageUrl": "https://example.com/tissue.jpg",
-        "pricePerUnit": 100,
-        "totalQuantity": 12,
-        "meetupLocation": "中和店出口處",
-        "meetupTime": "2026-03-17T19:00:00",
-        "expireTime": "2026-03-17T18:30:00"
-    }
+*   **請求體 (multipart/form-data)**：
+    ```
+    (表單數據，包含以下欄位)
     ```
     *   `storeId` (Integer): 門市 ID。
     *   `categoryId` (Integer): 商品分類 ID。
     *   `scenarioType` (String): 合購情境類型 ("INSTANT" (即時) 或 "SCHEDULED" (預約))。
     *   `itemName` (String): 商品名稱。
-    *   `itemImageUrl` (String, 可選): 商品圖片 URL。
+    *   `itemImageUrl` (String, 可選): 商品圖片 URL (主要圖片)。
     *   `pricePerUnit` (Integer): 每單位價格。
     *   `totalQuantity` (Integer): 總數量。
     *   `meetupLocation` (String): 面交地點。
     *   `meetupTime` (LocalDateTime): 面交時間。
     *   `expireTime` (LocalDateTime): 合購單過期時間。
+    *   `images` (List<MultipartFile>, 可選): 商品圖片檔案列表，最多 3 個。
 *   **回應 (application/json)**：
     ```json
     {
