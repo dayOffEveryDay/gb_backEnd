@@ -241,6 +241,44 @@
     }
     ```
 
+#### 2.8 查詢個人信用分數紀錄 (信用存摺)
+*   **功能**：查詢當前登入使用者的信用分數變動歷史紀錄。
+*   **端點**：`/api/v1/campaigns/me/credit-logs`
+*   **方法**：`GET`
+*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
+*   **請求參數**：
+    *   `page` (int, 可選): 頁碼，預設為 `0`。
+    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
+*   **回應 (application/json)**：
+    ```json
+    {
+        "content": [
+            {
+                "id": 1,
+                "scoreChange": -10,
+                "reason": "團主放鳥：合購單 [123]",
+                "campaignId": 123,
+                "createdAt": "2026-03-20T10:00:00"
+            }
+        ],
+        "pageable": { ... }, // Spring Data Page 相關資訊
+        "totalPages": 10,
+        "totalElements": 100,
+        "size": 10,
+        "number": 0,
+        "numberOfElements": 10,
+        "first": true,
+        "last": false,
+        "empty": false
+    }
+    ```
+    *   `content` (Array of CreditLogResponse): 信用分數紀錄列表。
+        *   `id` (Long): 紀錄 ID。
+        *   `scoreChange` (Integer): 信用分數變動值 (正數為增加，負數為減少)。
+        *   `reason` (String): 變動原因。
+        *   `campaignId` (Long, 可選): 相關合購單 ID (如果有的話)。
+        *   `createdAt` (LocalDateTime): 紀錄建立時間。
+
 ### 3. 參考數據相關 (ReferenceDataController)
 
 #### 3.1 取得所有營業中的門市
@@ -289,7 +327,7 @@
     *   `name` (String): 分類名稱。
     *   `icon` (String): 分類圖示 (Emoji)。
 
-### 4. 評價相關 (ReviewController)
+### 4. 評價管理 (ReviewController)
 
 #### 4.1 創建評價
 *   **功能**：使用者對已完成的合購單中的另一方進行評價。
@@ -317,7 +355,7 @@
     }
     ```
 
-### 5. 使用者相關 (UserController)
+### 5. 使用者資料管理 (UserController)
 
 #### 5.1 更新個人資料
 *   **功能**：更新當前使用者的個人資料。
