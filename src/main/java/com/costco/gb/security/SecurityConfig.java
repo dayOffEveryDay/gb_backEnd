@@ -43,7 +43,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/dev-login").permitAll()
 
                         // 2. 【完全公開的 API】 (免登入即可存取)
-                        .requestMatchers("/api/v1/auth/line").permitAll() // Line 登入
+                        .requestMatchers("/api/v1/auth/line", "/images/**").permitAll() // Line 登入
                         .requestMatchers(HttpMethod.GET, "/api/v1/stores").permitAll() // 門市列表
                         .requestMatchers(HttpMethod.GET, "/api/v1/categories").permitAll() // 分類列表
 
@@ -51,7 +51,6 @@ public class SecurityConfig {
                         // 列表與明細大家都能看，但 POST (發起開團)、PUT/DELETE (修改狀態) 不在此限
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns/*").permitAll()
-
                         // 4. 【其他所有的 API 呼叫】 (包含 /join, /withdraw, /reviews 等)
                         // 預設全部攔截，必須攜帶合法的 JWT Token 才能通行
                         .anyRequest().authenticated()

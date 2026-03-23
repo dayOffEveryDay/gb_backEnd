@@ -2,16 +2,12 @@ package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
-import com.costco.gb.entity.Campaign;
-import com.costco.gb.entity.Category;
-import com.costco.gb.entity.Store;
-import com.costco.gb.entity.User;
-import com.costco.gb.repository.CampaignRepository;
-import com.costco.gb.repository.CategoryRepository;
-import com.costco.gb.repository.StoreRepository;
-import com.costco.gb.repository.UserRepository;
+import com.costco.gb.dto.response.CreditLogResponse;
+import com.costco.gb.entity.*;
+import com.costco.gb.repository.*;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value; // 貼上這行
 import lombok.extern.slf4j.Slf4j;
 import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.data.domain.Page;
@@ -19,8 +15,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import com.costco.gb.entity.Participant;
-import com.costco.gb.repository.ParticipantRepository;
 import com.costco.gb.dto.request.JoinCampaignRequest;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -42,6 +36,10 @@ public class CampaignService {
     private final CategoryRepository categoryRepository;
     private final ParticipantRepository participantRepository;
     private final String UPLOAD_DIR = "uploads/campaigns/";
+    private final CreditScoreLogRepository creditScoreLogRepository; // 👈 加入這行
+    // 🌟 注入 YML 裡的 base-url 參數
+    @Value("${app.base-url}")
+    private String baseUrl;
 
     // 把參數補上 categoryId 和 keyword
     public Page<CampaignSummaryResponse> getActiveCampaigns(Integer storeId, Integer categoryId, String keyword, int page, int size) {
@@ -156,16 +154,32 @@ public class CampaignService {
         }
     }
     // 輔助方法：Entity 轉 DTO
+    // 輔助方法：Entity 轉 DTO
     private CampaignSummaryResponse mapToSummaryResponse(Campaign campaign) {
+
+        // 🌟 1. 處理圖片字串，轉換成前端可直接讀取的完整網址 List
+        List<String> imageUrlList = new java.util.ArrayList<>();
+        if (campaign.getImageUrls() != null && !campaign.getImageUrls().isEmpty()) {
+            String[] images = campaign.getImageUrls().split(",");
+            for (String img : images) {
+                // 🌟 直接將 baseUrl 與圖片路徑組裝成完整網址！
+                // (例如: "http://localhost:8080/images/uuid.jpg")
+                imageUrlList.add(baseUrl + "/images/" + img);
+            }
+        }
+
+        // 🌟 2. 組裝回傳物件
         return CampaignSummaryResponse.builder()
                 .id(campaign.getId())
                 .itemName(campaign.getItemName())
-                .itemImageUrl(campaign.getImageUrls())
+                .imageUrls(imageUrlList) // 👈 改成塞入我們剛組裝好的 List
+                .scenarioType(campaign.getScenarioType())
                 .pricePerUnit(campaign.getPricePerUnit())
                 .totalQuantity(campaign.getTotalQuantity())
                 .availableQuantity(campaign.getAvailableQuantity())
                 .meetupLocation(campaign.getMeetupLocation())
                 .meetupTime(campaign.getMeetupTime())
+                .expireTime(campaign.getExpireTime())
                 .status(campaign.getStatus())
                 .storeName(campaign.getStore().getName())
                 .categoryName(campaign.getCategory().getName())
@@ -374,8 +388,15 @@ public class CampaignService {
             int newScore = Math.max(0, host.getCreditScore() - 10);
             host.setCreditScore(newScore);
             userRepository.save(host);
-
-            // 3. 🕊️ 真正釋放團員的地方！直接呼叫 Repository 的批次更新方法
+            // 3. 寫入信用存摺：幽靈放鳥
+            CreditScoreLog csLog = CreditScoreLog.builder()
+                    .user(host)
+                    .scoreChange(-10)
+                    .reason("面交時間超過24小時未處理，系統判定放鳥")
+                    .campaignId(campaign.getId())
+                    .build();
+            creditScoreLogRepository.save(csLog);
+            // 4. 🕊️ 真正釋放團員的地方！直接呼叫 Repository 的批次更新方法
             int releasedCount = participantRepository.cancelAllByCampaignId(campaign.getId());
 
             log.warn("🚨 抓到幽靈團主！合購單 {} 強制結案。團主信用扣 10 分。共釋放了 {} 名無辜團員！",
@@ -423,6 +444,14 @@ public class CampaignService {
             int newScore = Math.max(0, host.getCreditScore() - penalty);
             host.setCreditScore(newScore);
             userRepository.save(host);
+            // 🌟 寫入信用存摺：主動取消
+            CreditScoreLog cslog = CreditScoreLog.builder()
+                    .user(host)
+                    .scoreChange(-penalty)
+                    .reason("團主主動取消" + penaltyReason + "的合購單")
+                    .campaignId(campaignId)
+                    .build();
+            creditScoreLogRepository.save(cslog);
 
             // 釋放所有被放鳥的團員 (呼叫 Repository 的批次更新)
             int releasedCount = participantRepository.cancelAllByHost(campaignId);
@@ -438,4 +467,5 @@ public class CampaignService {
         campaign.setStatus("CANCELLED");
         campaignRepository.save(campaign);
     }
+
 }

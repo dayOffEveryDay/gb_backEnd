@@ -3,19 +3,22 @@ package com.costco.gb.dto.response;
 import lombok.Builder;
 import lombok.Data;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
 public class CampaignSummaryResponse {
     private Long id;
     private String itemName;
-    private String itemImageUrl;
+    private List<String> imageUrls;
     private Integer pricePerUnit;
     private Integer totalQuantity;
     private Integer availableQuantity;
     private String meetupLocation;
     private LocalDateTime meetupTime;
+    private LocalDateTime expireTime;
     private String status;
+    private String scenarioType;
 
     // 關聯資訊 (扁平化處理，方便前端直接讀取)
     private String storeName;

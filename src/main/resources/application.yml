@@ -33,7 +33,7 @@ line:
     client-secret: ${GBC_LINE_CHANNEL_SECRET}
     token-uri: https://api.line.me/oauth2/v2.1/token
     user-info-uri: https://api.line.me/v2/profile
-    redirect-uri: "http://localhost:3000/login/callback" # ⚠️ 這裡要填你 React 前端接收 Line callback 的網址
+    redirect-uri: "http://localhost:5173/login/callback" # ⚠️ 這裡要填你 React 前端接收 Line callback 的網址
 server:
   port: 8080
 application:
@@ -51,3 +51,5 @@ logging:
   pattern:
     # 自訂 Log 格式，加入 [%X{traceId}]
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] [%X{traceId}] %-40.40logger{39} : %m%n"
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}

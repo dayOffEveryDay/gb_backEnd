@@ -2,7 +2,9 @@ package com.costco.gb.controller;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
+import com.costco.gb.dto.response.CreditLogResponse;
 import com.costco.gb.service.CampaignService;
+import com.costco.gb.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -19,7 +21,7 @@ import java.util.Map;
 public class CampaignController {
 
     private final CampaignService campaignService;
-
+    private final UserService userService;
     @GetMapping
     public ResponseEntity<Page<CampaignSummaryResponse>> getCampaigns(
             @RequestParam(required = false) Integer storeId,
@@ -122,6 +124,18 @@ public class CampaignController {
                 "success", true,
                 "message", "合購單已成功取消。若有團員已加入，您的信用分數將會受到相應的扣除。"
         ));
+    }
+
+    // 🌟 查詢個人信用分明細 (信用存摺)
+    @GetMapping("/me/credit-logs")
+    public ResponseEntity<Page<CreditLogResponse>> getMyCreditLogs(
+            @RequestAttribute("userId") Long userId, // (或依據你的 Token 解析方式取得)
+            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) { // 👈 讓 Spring 自動接分頁參數
+
+        // 完美匹配！直接將 userId 和 pageable 傳給 Service
+        Page<CreditLogResponse> response = userService.getMyCreditLogs(userId, pageable);
+
+        return ResponseEntity.ok(response);
     }
 
 }
