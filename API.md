@@ -279,10 +279,30 @@
         *   `campaignId` (Long, 可選): 相關合購單 ID (如果有的話)。
         *   `createdAt` (LocalDateTime): 紀錄建立時間。
 
+#### 2.9 取得「我開的團」列表
+*   **功能**：查詢當前登入使用者發起的所有合購單列表。
+*   **端點**：`/api/v1/campaigns/my-hosted`
+*   **方法**：`GET`
+*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
+*   **請求參數**：
+    *   `page` (int, 可選): 頁碼，預設為 `0`。
+    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
+*   **回應 (application/json)**：與 `2.1 取得合購單列表` 的回應格式相同，但只包含當前用戶發起的合購單。
+
+#### 2.10 取得「我跟的團」列表
+*   **功能**：查詢當前登入使用者參與的所有合購單列表。
+*   **端點**：`/api/v1/campaigns/my-joined`
+*   **方法**：`GET`
+*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
+*   **請求參數**：
+    *   `page` (int, 可選): 頁碼，預設為 `0`。
+    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
+*   **回應 (application/json)**：與 `2.1 取得合購單列表` 的回應格式相同，但只包含當前用戶參與的合購單。
+
 ### 3. 參考數據相關 (ReferenceDataController)
 
 #### 3.1 取得所有營業中的門市
-*   **功能**：取得所有營業中的好市多門市列表。
+*   **功能**：取得所有營業中的好市多門市資訊，包含營業時間，供前端顯示。
 *   **端點**：`/api/v1/stores`
 *   **方法**：`GET`
 *   **回應 (application/json)**：
@@ -291,18 +311,24 @@
         {
             "id": 1,
             "name": "中和店",
-            "address": "新北市中和區中山路二段347號"
+            "address": "新北市中和區中山路二段347號",
+            "openTime": "10:00",
+            "closeTime": "21:30"
         },
         {
             "id": 2,
             "name": "內湖店",
-            "address": "台北市內湖區舊宗路一段268號"
+            "address": "台北市內湖區舊宗路一段268號",
+            "openTime": "09:00",
+            "closeTime": "22:00"
         }
     ]
     ```
     *   `id` (Integer): 門市 ID。
     *   `name` (String): 門市名稱。
     *   `address` (String): 門市地址。
+    *   `openTime` (String): 門市營業開始時間 (例如 "10:00")。
+    *   `closeTime` (String): 門市營業結束時間 (例如 "21:30")。
 
 #### 3.2 取得所有商品分類
 *   **功能**：取得所有商品分類列表。

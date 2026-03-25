@@ -122,25 +122,41 @@
         *   嚴懲團主：扣除其信用分數 (例如 10 分)。**並寫入 `CreditScoreLog`。**
         *   釋放所有受影響的參與者，將其 `Participant` 狀態變更為 `CANCELLED`。
 
+### 2.9 查詢我發起的合購單
+*   **商業邏輯**：查詢當前使用者作為團主發起的所有合購單列表。
+*   **輸入**：`userId` (Long, 團主使用者 ID)、`pageable` (Spring Data `Pageable` 物件)
+*   **輸出**：`Page<CampaignSummaryResponse>` (分頁的合購單摘要列表)
+*   **處理流程**：
+    1.  從 `CampaignRepository` 根據 `userId` (團主 ID) 查詢所有合購單，並以建立時間倒序排序。
+    2.  將查詢結果的 `Campaign` 實體轉換為 `CampaignSummaryResponse` DTO，其中圖片 URL 會被處理成前端可直接訪問的完整路徑。
+
+### 2.10 查詢我參與的合購單
+*   **商業邏輯**：查詢當前使用者作為參與者加入的所有合購單列表。
+*   **輸入**：`userId` (Long, 參與者使用者 ID)、`pageable` (Spring Data `Pageable` 物件)
+*   **輸出**：`Page<CampaignSummaryResponse>` (分頁的合購單摘要列表)
+*   **處理流程**：
+    1.  從 `CampaignRepository` 根據 `userId` 查詢所有使用者參與的合購單，並以建立時間倒序排序。
+    2.  將查詢結果的 `Campaign` 實體轉換為 `CampaignSummaryResponse` DTO，其中圖片 URL 會被處理成前端可直接訪問的完整路徑。
+
 ---
 
 ## 3. 參考資料查詢 (ReferenceDataService)
 
 ### 3.1 取得所有營業中的門市
-*   **商業邏輯**：查詢並返回所有營業中的好市多門市資訊，供前端顯示。
+*   **商業邏輯**：查詢並返回所有營業中的好市多門市資訊，包含營業時間，供前端顯示。
 *   **輸入**：無
 *   **輸出**：`List<StoreResponse>`
 *   **處理流程**：
-    1.  從 `StoreRepository` 查詢所有門市。
-    2.  將 `Store` 實體轉換為 `StoreResponse` DTO 列表。
+    1.  從 `StoreRepository` 查詢所有 `isActive` 為 `true` 的門市。
+    2.  將 `Store` 實體轉換為 `StoreResponse` DTO 列表，包含 `id`、`name`、`address`、`openTime` 和 `closeTime`。
 
 ### 3.2 取得所有商品分類
 *   **商業邏輯**：查詢並返回所有商品分類資訊，供前端顯示。
 *   **輸入**：無
 *   **輸出**：`List<CategoryResponse>`
 *   **處理流程**：
-    1.  從 `CategoryRepository` 查詢所有商品分類。
-    2.  將 `Category` 實體轉換為 `CategoryResponse` DTO 列表。
+    1.  從 `CategoryRepository` 查詢所有商品分類，並依照 `sortOrder` 升序排序。
+    2.  將 `Category` 實體轉換為 `CategoryResponse` DTO 列表，包含 `id`、`name` 和 `icon`。
 
 ---
 
@@ -165,7 +181,7 @@
 *   **輸出**：無直接返回，成功時靜默完成，失敗時拋出錯誤。
 *   **處理流程**：
     1.  根據 `userId` 查詢使用者。
-    2.  更新 `User` 實體的 `displayName` 和 `hasCostcoMembership` 欄位。
+    2.  如果前端有傳入新的值，才進行更新 `User` 實體的 `displayName` 和 `hasCostcoMembership` 欄位。
     3.  保存更新後的使用者實體。
 
 ### 5.2 查詢個人信用分數紀錄
