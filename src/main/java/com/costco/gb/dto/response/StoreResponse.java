@@ -9,4 +9,6 @@ public class StoreResponse {
     private Integer id;
     private String name;
     private String address;
+    private String openTime;
+    private String closeTime;
 }

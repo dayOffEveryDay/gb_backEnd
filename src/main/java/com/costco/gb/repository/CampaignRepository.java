@@ -25,6 +25,10 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             String status, LocalDateTime now, Pageable pageable);
     // 團主個人頁面：查詢某位團主發起的所有合購單 (依建立時間倒序)
     Page<Campaign> findByHostIdOrderByCreatedAtDesc(Long hostId, Pageable pageable);
+    // 🌟  查詢「我參與的合購單」(我跟的團)
+    // 透過 Participant 明細表反向找回 Campaign 主單，並依據合購單建立時間倒序
+    @Query("SELECT p.campaign FROM Participant p WHERE p.user.id = :userId ORDER BY p.campaign.createdAt DESC")
+    Page<Campaign> findJoinedCampaignsByUserId(@Param("userId") Long userId, Pageable pageable);
 
     // 支援動態條件的超強大查詢 (如果參數傳 null，該條件就會自動被忽略)
     @Query("SELECT c FROM Campaign c WHERE " +
@@ -73,5 +77,6 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             "AND c.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'HOST_NO_SHOW') " +
             "AND c.imageUrls IS NOT NULL AND c.imageUrls NOT LIKE '%_thumb%'")
     List<Campaign> findOldCampaignsForImageCompression(@Param("timeLimit") LocalDateTime timeLimit);
+
 
 }

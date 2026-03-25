@@ -137,5 +137,23 @@ public class CampaignController {
 
         return ResponseEntity.ok(response);
     }
+    // 🌟 取得「我開的團」列表
+    @GetMapping("/my-hosted")
+    public ResponseEntity<Page<CampaignSummaryResponse>> getMyHostedCampaigns(
+            @RequestAttribute("userId") Long userId, // 依據你實際攔截器的寫法取得 User ID
+            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
 
+        Page<CampaignSummaryResponse> response = campaignService.getMyHostedCampaigns(userId, pageable);
+        return ResponseEntity.ok(response);
+    }
+
+    // 🌟 取得「我跟的團」列表
+    @GetMapping("/my-joined")
+    public ResponseEntity<Page<CampaignSummaryResponse>> getMyJoinedCampaigns(
+            @RequestAttribute("userId") Long userId,
+            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
+
+        Page<CampaignSummaryResponse> response = campaignService.getMyJoinedCampaigns(userId, pageable);
+        return ResponseEntity.ok(response);
+    }
 }

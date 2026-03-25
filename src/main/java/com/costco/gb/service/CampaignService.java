@@ -2,10 +2,8 @@ package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
-import com.costco.gb.dto.response.CreditLogResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value; // 貼上這行
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +15,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import com.costco.gb.dto.request.JoinCampaignRequest;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.time.LocalDateTime;
@@ -153,7 +152,24 @@ public class CampaignService {
             throw new RuntimeException("發起合購單失敗：" + e.getMessage());
         }
     }
-    // 輔助方法：Entity 轉 DTO
+
+    // 🌟 查詢我發起的合購單
+    @Transactional(readOnly = true)
+    public Page<CampaignSummaryResponse> getMyHostedCampaigns(Long userId, Pageable pageable) {
+        Page<Campaign> campaigns = campaignRepository.findByHostIdOrderByCreatedAtDesc(userId, pageable);
+
+        // 呼叫我們之前寫好、帶有完整圖片網址的 mapToSummaryResponse
+        return campaigns.map(this::mapToSummaryResponse);
+    }
+
+    // 🌟 查詢我參與的合購單
+    @Transactional(readOnly = true)
+    public Page<CampaignSummaryResponse> getMyJoinedCampaigns(Long userId, Pageable pageable) {
+        Page<Campaign> campaigns = campaignRepository.findJoinedCampaignsByUserId(userId, pageable);
+
+        // 一樣無痛轉成前端需要的 DTO 格式
+        return campaigns.map(this::mapToSummaryResponse);
+    }
     // 輔助方法：Entity 轉 DTO
     private CampaignSummaryResponse mapToSummaryResponse(Campaign campaign) {
 

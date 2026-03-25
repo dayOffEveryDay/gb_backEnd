@@ -23,6 +23,8 @@ public class ReferenceDataService {
                         .id(store.getId())
                         .name(store.getName())
                         .address(store.getAddress())
+                        .openTime(store.getOpenTime().toString())
+                        .closeTime(store.getCloseTime().toString())
                         .build())
                 .collect(Collectors.toList());
     }
