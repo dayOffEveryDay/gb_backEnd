@@ -129,10 +129,12 @@ public class CampaignController {
     // 🌟 查詢個人信用分明細 (信用存摺)
     @GetMapping("/me/credit-logs")
     public ResponseEntity<Page<CreditLogResponse>> getMyCreditLogs(
-            @RequestAttribute("userId") Long userId, // (或依據你的 Token 解析方式取得)
-            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) { // 👈 讓 Spring 自動接分頁參數
+            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
 
-        // 完美匹配！直接將 userId 和 pageable 傳給 Service
+        // ✨ 一樣的做法
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
+
         Page<CreditLogResponse> response = userService.getMyCreditLogs(userId, pageable);
 
         return ResponseEntity.ok(response);
@@ -140,8 +142,11 @@ public class CampaignController {
     // 🌟 取得「我開的團」列表
     @GetMapping("/my-hosted")
     public ResponseEntity<Page<CampaignSummaryResponse>> getMyHostedCampaigns(
-            @RequestAttribute("userId") Long userId, // 依據你實際攔截器的寫法取得 User ID
             @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
+
+        // ✨ 用你原本成功的寫法，直接從 SecurityContext 拿！
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
 
         Page<CampaignSummaryResponse> response = campaignService.getMyHostedCampaigns(userId, pageable);
         return ResponseEntity.ok(response);
@@ -150,8 +155,11 @@ public class CampaignController {
     // 🌟 取得「我跟的團」列表
     @GetMapping("/my-joined")
     public ResponseEntity<Page<CampaignSummaryResponse>> getMyJoinedCampaigns(
-            @RequestAttribute("userId") Long userId,
             @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
+
+        // ✨ 一樣的做法
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
 
         Page<CampaignSummaryResponse> response = campaignService.getMyJoinedCampaigns(userId, pageable);
         return ResponseEntity.ok(response);
