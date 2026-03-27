@@ -1,37 +1,77 @@
-# Schedule.md - 後端排程任務詳解
+# Schedule.md
 
-本文件詳細說明 `gb_backend` 專案中定義的各項排程任務，包含其觸發頻率、功能目的以及相關的商業邏輯。
+本文件整理目前專案已實作的排程工作，內容以 `CampaignScheduler` 與其對應 service/repository 行為為準。
 
 ---
 
-## 1. 關閉過期合購單 (`closeExpiredCampaigns`)
-*   **功能**：自動掃描並關閉所有已過期的合購單，將其狀態更新為 `FAILED`。
-*   **觸發頻率**：每分鐘的第 0 秒執行一次 (`cron = "0 * * * * *"`)
-*   **商業邏輯**：
-    1.  每分鐘檢查一次資料庫中所有 `status` 為 `OPEN` 且 `expireTime` 早於當前時間的合購單。
-    2.  將這些過期合購單的狀態批次更新為 `FAILED`。
-    3.  此排程主要用於處理因時間截止而未能成團或未被團主及時處理的合購單，確保數據的即時性。
-*   **優化考量 (TODO)**：目前使用資料庫輪詢。未來若流量增加，建議改用 Redis Keyspace Notifications 或 Message Queue 的延遲佇列機制，以降低資料庫負擔，實現事件驅動的狀態變更。
+## 1. `closeExpiredCampaigns`
 
-## 2. 追蹤幽靈團主 (`huntGhostedCampaigns`)
-*   **功能**：定期掃描並處理那些團主長時間未確認面交的「幽靈單」，對團主進行懲罰並釋放團員。
-*   **觸發頻率**：每小時的第 30 分鐘執行一次 (`cron = "0 30 * * * *"`)
-*   **商業邏輯**：
-    1.  呼叫 `CampaignService` 中的 `processGhostedCampaigns` 方法。
-    2.  該方法會查詢所有超過 24 小時未被宣告面交 (DELIVERED) 的活躍中 (OPEN 或 FULL) 合購單。
-    3.  將幽靈單的狀態標記為 `HOST_NO_SHOW` (團主放鳥)。
-    4.  扣除團主信用分數 (例如 10 分)。
-    5.  將所有受影響的團員明細狀態批次更新為 `CANCELLED` (釋放團員)。
-*   **目的**：維護平台交易的公平性與流暢度，防止團主惡意佔用資源或失聯導致團員權益受損。
+- 位置: `com.costco.gb.scheduler.CampaignScheduler`
+- Cron: `0 * * * * *`
+- 執行頻率: 每分鐘第 0 秒
+- 用途: 將已過期且仍可募集的合購自動關閉
+- 實際流程:
+  1. 取得目前時間 `LocalDateTime.now()`
+  2. 呼叫 `campaignRepository.updateExpiredCampaignsStatus(now)`
+  3. 將符合條件的合購狀態更新為 `FAILED`
+- 影響:
+  - 已過 `expireTime` 的 `OPEN` 合購會被關閉
+  - 目前這支排程只做狀態更新，不會處理通知
 
-## 3. 圖片壓縮與清理 (`compressOldCampaignImages`)
-*   **功能**：定期將超過三個月的合購單商品原圖壓縮成 100x100 的縮圖，並刪除原始大圖，以節省伺服器儲存空間。
-*   **觸發頻率**：每天凌晨 3 點執行一次 (`cron = "0 0 3 * * *"`)
-*   **商業邏輯**：
-    1.  查詢所有創建時間超過三個月的合購單。
-    2.  對於每筆合購單中的圖片：
-        *   為每張圖片生成一個新的縮圖檔名 (例如 `uuid.jpg` 變成 `uuid_thumb.jpg`)。
-        *   使用 `Thumbnailator` 庫將原始圖片壓縮成 100x100 像素的縮圖，並將畫質設定為 80%。
-        *   壓縮成功後，物理刪除原始大圖檔案。
-        *   更新資料庫中 `Campaign` 實體的 `imageUrls` 欄位為新的縮圖檔名。
-    3.  此排程旨在最佳化儲存空間使用，尤其針對不再頻繁訪問的舊有合購單圖片。
+---
+
+## 2. `huntGhostedCampaigns`
+
+- 位置: `com.costco.gb.scheduler.CampaignScheduler`
+- Cron: `0 30 * * * *`
+- 執行頻率: 每小時第 30 分鐘
+- 用途: 抓出團主超時未交付的合購
+- 實際流程:
+  1. 排程呼叫 `campaignService.processGhostedCampaigns()`
+  2. service 內部找出超過 24 小時仍未交付的合購
+  3. 將合購狀態改成 `HOST_NO_SHOW`
+  4. 團主信用分扣 10 分
+  5. 寫入一筆 `CreditScoreLog`
+  6. 取消該合購下的全部參與者
+- 影響:
+  - 這是目前主要的失約處理機制
+  - 會同時影響合購狀態、團主信用分、參與者狀態
+
+---
+
+## 3. `compressOldCampaignImages`
+
+- 位置: `com.costco.gb.scheduler.CampaignScheduler`
+- Cron: `0 0 3 * * *`
+- 執行頻率: 每天凌晨 3 點
+- 用途: 壓縮舊合購圖片，降低檔案體積
+- 實際流程:
+  1. 取出 90 天前的舊合購資料
+  2. 掃描 `campaign.imageUrls` 內每張圖片
+  3. 以 Thumbnailator 產生 `100x100` 縮圖
+  4. 縮圖品質設定為 `0.8`
+  5. 新檔名格式為 `原檔名_thumb.副檔名`
+  6. 成功後刪除原圖
+  7. 將 `campaign.imageUrls` 改成縮圖檔名後存回資料庫
+- 影響:
+  - 圖片檔案實體會被替換成縮圖
+  - 若單張圖片處理失敗，該張圖會保留原檔名，不中斷整批流程
+
+---
+
+## 4. 排程總覽
+
+| 方法 | Cron | 頻率 | 主要作用 |
+| --- | --- | --- | --- |
+| `closeExpiredCampaigns` | `0 * * * * *` | 每分鐘 | 關閉過期合購，狀態改 `FAILED` |
+| `huntGhostedCampaigns` | `0 30 * * * *` | 每小時 30 分 | 處理團主超時未交付，改 `HOST_NO_SHOW` 並扣分 |
+| `compressOldCampaignImages` | `0 0 3 * * *` | 每天 03:00 | 壓縮 90 天前的合購圖片 |
+
+---
+
+## 5. 目前排程特性與限制
+
+- 排程皆為本機 Spring `@Scheduled`
+- 沒有分散式鎖，若未來多台服務同時啟動，可能重複執行
+- `closeExpiredCampaigns` 與 `huntGhostedCampaigns` 目前都偏向資料庫輪詢模式
+- 通知、事件佇列、Redis 協調目前仍是 TODO，尚未實作

@@ -1,426 +1,416 @@
-# API.md - 後端 API 文件
+# API.md
 
-## 專案功能概覽
+本文件整理目前專案 `gb_backEnd` 已實作的 API，內容以 `controller`、`dto` 與實際 service 行為為準。
 
-本專案提供一個輕量、即時的在地化（LBS）好市多合購媒合服務，主要功能包括：
-*   **會員與社交系統**：Line OAuth2 登入、信用評分、黑名單、關注團購主。
-*   **開團與認購機制**：即時湊單、未來預約分購、防超賣庫存、狀態機與排程流局。
-*   **即時通訊與通知**：專屬聊天室、站內小鈴鐺推播。
-*   **基礎資料查詢**：取得門市、商品分類等參考資料。
+## 共通說明
 
----
-
-## API 端點詳情
-
-### 1. 認證相關 (AuthController)
-
-#### 1.1 Line 登入
-*   **功能**：處理 Line OAuth2 登入，返回 JWT Token 和使用者資訊。
-*   **端點**：`/api/v1/auth/line`
-*   **方法**：`POST`
-*   **請求體 (application/json)**：
-    ```json
-    {
-        "code": "Line 授權碼",
-        "redirectUri": "與 Line 授權時相同的重定向 URI"
-    }
-    ```
-    *   `code` (String): Line 授權碼。
-    *   `redirectUri` (String): 為了安全驗證，Line 要求換 Token 時必須帶上與當初要求授權時一模一樣的 `redirectUri`。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "token": "JWT Token",
-        "isNewUser": true,
-        "user": {
-            "id": 123,
-            "displayName": "使用者名稱",
-            "profileImageUrl": "使用者頭像 URL",
-            "hasCostcoMembership": false
-        }
-    }
-    ```
-    *   `token` (String): JWT 認證 Token。
-    *   `isNewUser` (boolean): 是否為新註冊的使用者。
-    *   `user` (Object): 使用者基本資訊。
-        *   `id` (Long): 使用者 ID。
-        *   `displayName` (String): 使用者顯示名稱。
-        *   `profileImageUrl` (String): 使用者頭像 URL。
-        *   `hasCostcoMembership` (Boolean): 是否擁有好市多會員資格。
-
-#### 1.2 開發者後門登入 (開發環境專用)
-*   **功能**：開發者專用，直接發放 JWT Token，正式上線前應刪除。
-*   **端點**：`/api/v1/auth/dev-login`
-*   **方法**：`GET`
-*   **請求參數**：
-    *   `userId` (Long, 可選): 指定登入的使用者 ID，預設為 `1`。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "message": "開發者後門登入成功",
-        "userId": "1",
-        "token": "JWT Token"
-    }
-    ```
-    *   `message` (String): 成功訊息。
-    *   `userId` (String): 登入的使用者 ID。
-    *   `token` (String): JWT 認證 Token。
-
-### 2. 合購活動相關 (CampaignController)
-
-#### 2.1 取得合購單列表
-*   **功能**：取得所有活躍中的合購單列表，可依門市、分類、關鍵字篩選，並支援分頁。
-*   **端點**：`/api/v1/campaigns`
-*   **方法**：`GET`
-*   **請求參數**：
-    *   `storeId` (Integer, 可選): 門市 ID，用於篩選特定門市的合購單。
-    *   `categoryId` (Integer, 可選): 商品分類 ID，用於篩選特定分類的合購單。
-    *   `keyword` (String, 可選): 關鍵字，用於搜尋商品名稱。
-    *   `page` (int, 可選): 頁碼，預設為 `0`。
-    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "content": [
-            {
-                "id": 1,
-                "itemName": "美味鮭魚排",
-                "itemImageUrl": "https://example.com/salmon.jpg",
-                "pricePerUnit": 300,
-                "totalQuantity": 5,
-                "availableQuantity": 2,
-                "meetupLocation": "中和好市多熟食區",
-                "meetupTime": "2026-03-17T18:00:00",
-                "status": "OPEN",
-                "storeName": "中和店",
-                "categoryName": "生鮮",
-                "host": {
-                    "id": 101,
-                    "displayName": "團主A",
-                    "profileImageUrl": "https://example.com/host_a.jpg",
-                    "creditScore": 95
-                }
-            }
-        ],
-        "pageable": { ... }, // Spring Data Page 相關資訊
-        "totalPages": 10,
-        "totalElements": 100,
-        "size": 10,
-        "number": 0,
-        "numberOfElements": 10,
-        "first": true,
-        "last": false,
-        "empty": false
-    }
-    ```
-    *   `content` (Array of CampaignSummaryResponse): 合購單摘要列表。
-        *   `id` (Long): 合購單 ID。
-        *   `itemName` (String): 商品名稱。
-        *   `itemImageUrl` (String): 商品圖片 URL。
-        *   `pricePerUnit` (Integer): 每單位價格。
-        *   `totalQuantity` (Integer): 總數量。
-        *   `availableQuantity` (Integer): 可認購數量。
-        *   `meetupLocation` (String): 面交地點。
-        *   `meetupTime` (LocalDateTime): 面交時間。
-        *   `status` (String): 合購單狀態 (例如 "OPEN", "FULL", "CLOSED", "CANCELLED")。
-        *   `storeName` (String): 門市名稱。
-        *   `categoryName` (String): 商品分類名稱。
-        *   `host` (Object): 團主資訊。
-            *   `id` (Long): 團主 ID。
-            *   `displayName` (String): 團主顯示名稱。
-            *   `profileImageUrl` (String): 團主頭像 URL。
-            *   `creditScore` (Integer): 團主信用分數。
-
-#### 2.2 發起合購單
-*   **功能**：使用者發起一個新的合購活動，可上傳多張圖片。
-*   **端點**：`/api/v1/campaigns`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求體 (multipart/form-data)**：
-    ```
-    (表單數據，包含以下欄位)
-    ```
-    *   `storeId` (Integer): 門市 ID。
-    *   `categoryId` (Integer): 商品分類 ID。
-    *   `scenarioType` (String): 合購情境類型 ("INSTANT" (即時) 或 "SCHEDULED" (預約))。
-    *   `itemName` (String): 商品名稱。
-    *   `itemImageUrl` (String, 可選): 商品圖片 URL (主要圖片)。
-    *   `pricePerUnit` (Integer): 每單位價格。
-    *   `totalQuantity` (Integer): 總數量。
-    *   `meetupLocation` (String): 面交地點。
-    *   `meetupTime` (LocalDateTime): 面交時間。
-    *   `expireTime` (LocalDateTime): 合購單過期時間。
-    *   `images` (List<MultipartFile>, 可選): 商品圖片檔案列表，最多 3 個。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "合購單發起成功！"
-    }
-    ```
-
-#### 2.3 加入合購單
-*   **功能**：使用者加入一個現有的合購活動。
-*   **端點**：`/api/v1/campaigns/{id}/join`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **路徑參數**：
-    *   `id` (Long): 合購單 ID。
-*   **請求體 (application/json)**：
-    ```json
-    {
-        "quantity": 3
-    }
-    ```
-    *   `quantity` (Integer): 認購數量 (最少為 1)。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "成功加入合購！"
-    }
-    ```
-
-#### 2.4 退出合購單
-*   **功能**：使用者退出已加入的合購活動。
-*   **端點**：`/api/v1/campaigns/{id}/withdraw`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **路徑參數**：
-    *   `id` (Long): 合購單 ID。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "您已成功退出合購，相關紀錄已更新。"
-    }
-    ```
-
-#### 2.5 團主宣告已面交
-*   **功能**：團主標記合購單為已面交，等待團員確認收貨。
-*   **端點**：`/api/v1/campaigns/{id}/deliver`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **路徑參數**：
-    *   `id` (Long): 合購單 ID。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "已成功更改為待確認狀態，請等待團員點擊收貨。"
-    }
-    ```
-
-#### 2.6 團員確認收貨
-*   **功能**：團員確認已收到合購商品。
-*   **端點**：`/api/v1/campaigns/{id}/confirm`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **路徑參數**：
-    *   `id` (Long): 合購單 ID。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "您已確認收貨！感謝您的參與。"
-    }
-    ```
-
-#### 2.7 團主主動取消合購單
-*   **功能**：團主取消自己發起的合購單。
-*   **端點**：`/api/v1/campaigns/{id}/cancel`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **路徑參數**：
-    *   `id` (Long): 合購單 ID。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "合購單已成功取消。若有團員已加入，您的信用分數將會受到相應的扣除。"
-    }
-    ```
-
-#### 2.8 查詢個人信用分數紀錄 (信用存摺)
-*   **功能**：查詢當前登入使用者的信用分數變動歷史紀錄。
-*   **端點**：`/api/v1/campaigns/me/credit-logs`
-*   **方法**：`GET`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求參數**：
-    *   `page` (int, 可選): 頁碼，預設為 `0`。
-    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "content": [
-            {
-                "id": 1,
-                "scoreChange": -10,
-                "reason": "團主放鳥：合購單 [123]",
-                "campaignId": 123,
-                "createdAt": "2026-03-20T10:00:00"
-            }
-        ],
-        "pageable": { ... }, // Spring Data Page 相關資訊
-        "totalPages": 10,
-        "totalElements": 100,
-        "size": 10,
-        "number": 0,
-        "numberOfElements": 10,
-        "first": true,
-        "last": false,
-        "empty": false
-    }
-    ```
-    *   `content` (Array of CreditLogResponse): 信用分數紀錄列表。
-        *   `id` (Long): 紀錄 ID。
-        *   `scoreChange` (Integer): 信用分數變動值 (正數為增加，負數為減少)。
-        *   `reason` (String): 變動原因。
-        *   `campaignId` (Long, 可選): 相關合購單 ID (如果有的話)。
-        *   `createdAt` (LocalDateTime): 紀錄建立時間。
-
-#### 2.9 取得「我開的團」列表
-*   **功能**：查詢當前登入使用者發起的所有合購單列表。
-*   **端點**：`/api/v1/campaigns/my-hosted`
-*   **方法**：`GET`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求參數**：
-    *   `page` (int, 可選): 頁碼，預設為 `0`。
-    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
-*   **回應 (application/json)**：與 `2.1 取得合購單列表` 的回應格式相同，但只包含當前用戶發起的合購單。
-
-#### 2.10 取得「我跟的團」列表
-*   **功能**：查詢當前登入使用者參與的所有合購單列表。
-*   **端點**：`/api/v1/campaigns/my-joined`
-*   **方法**：`GET`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求參數**：
-    *   `page` (int, 可選): 頁碼，預設為 `0`。
-    *   `size` (int, 可選): 每頁顯示筆數，預設為 `10`。
-*   **回應 (application/json)**：與 `2.1 取得合購單列表` 的回應格式相同，但只包含當前用戶參與的合購單。
-
-### 3. 參考數據相關 (ReferenceDataController)
-
-#### 3.1 取得所有營業中的門市
-*   **功能**：取得所有營業中的好市多門市資訊，包含營業時間，供前端顯示。
-*   **端點**：`/api/v1/stores`
-*   **方法**：`GET`
-*   **回應 (application/json)**：
-    ```json
-    [
-        {
-            "id": 1,
-            "name": "中和店",
-            "address": "新北市中和區中山路二段347號",
-            "openTime": "10:00",
-            "closeTime": "21:30"
-        },
-        {
-            "id": 2,
-            "name": "內湖店",
-            "address": "台北市內湖區舊宗路一段268號",
-            "openTime": "09:00",
-            "closeTime": "22:00"
-        }
-    ]
-    ```
-    *   `id` (Integer): 門市 ID。
-    *   `name` (String): 門市名稱。
-    *   `address` (String): 門市地址。
-    *   `openTime` (String): 門市營業開始時間 (例如 "10:00")。
-    *   `closeTime` (String): 門市營業結束時間 (例如 "21:30")。
-
-#### 3.2 取得所有商品分類
-*   **功能**：取得所有商品分類列表。
-*   **端點**：`/api/v1/categories`
-*   **方法**：`GET`
-*   **回應 (application/json)**：
-    ```json
-    [
-        {
-            "id": 1,
-            "name": "生鮮",
-            "icon": "🥩"
-        },
-        {
-            "id": 2,
-            "name": "日用品",
-            "icon": "🧻"
-        }
-    ]
-    ```
-    *   `id` (Integer): 分類 ID。
-    *   `name` (String): 分類名稱。
-    *   `icon` (String): 分類圖示 (Emoji)。
-
-### 4. 評價管理 (ReviewController)
-
-#### 4.1 創建評價
-*   **功能**：使用者對已完成的合購單中的另一方進行評價。
-*   **端點**：`/api/v1/reviews`
-*   **方法**：`POST`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求體 (application/json)**：
-    ```json
-    {
-        "campaignId": 123,
-        "revieweeId": 456,
-        "rating": 5,
-        "comment": "團主很準時，商品包裝也很好，推！"
-    }
-    ```
-    *   `campaignId` (Long): 發生交易的合購單 ID。
-    *   `revieweeId` (Long): 被評價的人的 ID。
-    *   `rating` (Integer): 評分 (1 ~ 5)。
-    *   `comment` (String, 可選): 評價留言。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "評價成功！感謝您的回饋。"
-    }
-    ```
-
-### 5. 使用者資料管理 (UserController)
-
-#### 5.1 更新個人資料
-*   **功能**：更新當前使用者的個人資料。
-*   **端點**：`/api/v1/users/me`
-*   **方法**：`PUT`
-*   **請求頭**：`Authorization: Bearer <JWT_TOKEN>`
-*   **請求體 (application/json)**：
-    ```json
-    {
-        "displayName": "新的顯示名稱",
-        "hasCostcoMembership": true
-    }
-    ```
-    *   `displayName` (String, 可選): 新的顯示名稱。
-    *   `hasCostcoMembership` (Boolean, 可選): 是否擁有好市多會員資格。
-*   **回應 (application/json)**：
-    ```json
-    {
-        "success": true,
-        "message": "個人資料更新成功"
-    }
-    ```
+- Base Path: `/api/v1`
+- 驗證方式: 除登入與基礎資料查詢外，其餘 API 需帶 `Authorization: Bearer <JWT_TOKEN>`
+- 成功回傳格式:
+  - 查詢型 API 直接回傳 DTO 或分頁物件
+  - 動作型 API 多數回傳 `{ "success": true, "message": "..." }`
+- 錯誤處理: 由全域例外處理器統一回傳錯誤內容
 
 ---
 
-## 錯誤回應格式 (ErrorResponse)
+## 1. Auth API
 
-所有 API 發生錯誤時的通用回應格式。
+### 1.1 LINE 登入
+
+- 路徑: `/api/v1/auth/line`
+- Method: `POST`
+- 說明: 以 LINE OAuth code 交換 access token，取得 LINE 使用者資料，建立或更新本地會員，最後回傳 JWT
+- Request Body: `application/json`
+
 ```json
 {
-    "timestamp": "2026-03-17T10:30:00",
-    "status": 400,
-    "error": "Bad Request",
-    "message": "請求參數無效",
-    "path": "/api/v1/campaigns"
+  "code": "line-oauth-code",
+  "redirectUri": "https://example.com/callback"
 }
 ```
-*   `timestamp` (LocalDateTime): 發生錯誤的時間。
-*   `status` (int): HTTP 狀態碼 (例如 400, 404, 500)。
-*   `error` (String): 錯誤主旨 (例如 "Bad Request", "Not Found", "Internal Server Error")。
-*   `message` (String): 給使用者看的白話文錯誤訊息。
-*   `path` (String): 發生錯誤的 API 路徑。
+
+- Response: `AuthResponse`
+
+```json
+{
+  "token": "jwt-token",
+  "isNewUser": true,
+  "user": {
+    "id": 1,
+    "displayName": "A Hui",
+    "profileImageUrl": "https://profile.line-scdn.net/xxx",
+    "hasCostcoMembership": false
+  }
+}
+```
+
+### 1.2 開發用快速登入
+
+- 路徑: `/api/v1/auth/dev-login`
+- Method: `GET`
+- Query:
+  - `userId` `Long`, optional, 預設 `1`
+- 說明: 直接為指定 `userId` 產生 JWT，方便本機或測試環境驗證流程
+- Response:
+
+```json
+{
+  "message": "開發者快速登入成功",
+  "userId": "1",
+  "token": "jwt-token"
+}
+```
+
+---
+
+## 2. Campaign API
+
+### 2.1 取得合購列表
+
+- 路徑: `/api/v1/campaigns`
+- Method: `GET`
+- Query:
+  - `storeId` `Integer`, optional
+  - `categoryId` `Integer`, optional
+  - `keyword` `String`, optional
+  - `page` `int`, optional, 預設 `0`
+  - `size` `int`, optional, 預設 `10`
+- 說明: 取得符合條件的合購列表，依建立時間新到舊排序
+- Response: `Page<CampaignSummaryResponse>`
+
+```json
+{
+  "content": [
+    {
+      "id": 1,
+      "itemName": "鮭魚切片",
+      "imageUrls": [
+        "http://localhost:8080/images/uuid-a.jpg",
+        "http://localhost:8080/images/uuid-b.jpg"
+      ],
+      "pricePerUnit": 300,
+      "totalQuantity": 5,
+      "availableQuantity": 2,
+      "meetupLocation": "內湖店停車場",
+      "meetupTime": "2026-03-27T18:00:00",
+      "expireTime": "2026-03-27T16:00:00",
+      "status": "OPEN",
+      "scenarioType": "SCHEDULED",
+      "storeName": "內湖店",
+      "categoryName": "生鮮",
+      "host": {
+        "id": 10,
+        "displayName": "Host A",
+        "profileImageUrl": "https://example.com/a.jpg",
+        "creditScore": 95
+      }
+    }
+  ],
+  "totalPages": 1,
+  "totalElements": 1,
+  "size": 10,
+  "number": 0
+}
+```
+
+### 2.2 建立合購
+
+- 路徑: `/api/v1/campaigns`
+- Method: `POST`
+- Content-Type: `multipart/form-data`
+- 說明: 建立新的合購單，可上傳最多 3 張圖片
+- Form 欄位:
+  - `storeId` `Integer`
+  - `categoryId` `Integer`
+  - `scenarioType` `String`
+  - `itemName` `String`
+  - `pricePerUnit` `Integer`
+  - `totalQuantity` `Integer`
+  - `meetupLocation` `String`
+  - `meetupTime` `LocalDateTime`
+  - `expireTime` `LocalDateTime`
+  - `images` `List<MultipartFile>`, optional, 最多 3 張
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "合購建立成功"
+}
+```
+
+### 2.3 參加合購
+
+- 路徑: `/api/v1/campaigns/{id}/join`
+- Method: `POST`
+- Path Variable:
+  - `id` `Long`: 合購 ID
+- Request Body:
+
+```json
+{
+  "quantity": 2
+}
+```
+
+- 說明: 以目前登入者身份參加合購，`quantity` 至少為 `1`
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "成功參加合購"
+}
+```
+
+### 2.4 修改參加數量
+
+- 路徑: `/api/v1/campaigns/{id}/revise`
+- Method: `POST`
+- Path Variable:
+  - `id` `Long`: 合購 ID
+- Request Body:
+
+```json
+{
+  "quantity": 1
+}
+```
+
+- 說明: 將目前使用者在該合購中的參與數量往下調整指定數量
+- 實際行為:
+  - `quantity` 必須大於 `0`
+  - 修改後參與數量不得小於 `1`
+  - 若合購原本是 `FULL` 且釋出數量後有庫存，狀態會改回 `OPEN`
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "修改成功，已更新您的參與數量"
+}
+```
+
+### 2.5 退出合購
+
+- 路徑: `/api/v1/campaigns/{id}/withdraw`
+- Method: `POST`
+- Path Variable:
+  - `id` `Long`
+- 說明: 取消目前使用者在該合購中的參與
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "退出成功，已釋出您的參與數量"
+}
+```
+
+### 2.6 團主標記已交付
+
+- 路徑: `/api/v1/campaigns/{id}/deliver`
+- Method: `POST`
+- Path Variable:
+  - `id` `Long`
+- 說明: 僅團主可操作，且該合購必須為 `OPEN` 或 `FULL`
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "已標記為已交付，等待參與者確認"
+}
+```
+
+### 2.7 參與者確認收貨
+
+- 路徑: `/api/v1/campaigns/{id}/confirm`
+- Method: `POST`
+- Path Variable:
+  - `id` `Long`
+- 說明: 參與者確認收貨後，自己的參與狀態會改成 `CONFIRMED`；若所有參與者都確認，合購狀態會改成 `COMPLETED`
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "已確認收貨"
+}
+```
+
+### 2.8 團主取消合購
+
+- 路徑: `/api/v1/campaigns/{id}/cancel`
+- Method: `POST`
+- Path Variable:
+  - `id` `Long`
+- 說明: 僅團主可取消 `OPEN` 或 `FULL` 狀態的合購；若已有參與者，會依狀態扣團主信用分並釋放參與者
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "合購已取消，相關參與者已釋放"
+}
+```
+
+### 2.9 查詢我的信用分紀錄
+
+- 路徑: `/api/v1/campaigns/me/credit-logs`
+- Method: `GET`
+- Query:
+  - `page` `int`, optional, 預設 `0`
+  - `size` `int`, optional, 預設 `10`
+- Response: `Page<CreditLogResponse>`
+
+```json
+{
+  "content": [
+    {
+      "id": 1,
+      "scoreChange": -10,
+      "reason": "超過 24 小時未交付，視為團主失約",
+      "campaignId": 99,
+      "createdAt": "2026-03-27T10:00:00"
+    }
+  ]
+}
+```
+
+### 2.10 查詢我開的合購
+
+- 路徑: `/api/v1/campaigns/my-hosted`
+- Method: `GET`
+- Query:
+  - `page` `int`, optional, 預設 `0`
+  - `size` `int`, optional, 預設 `10`
+- Response: `Page<CampaignSummaryResponse>`
+
+### 2.11 查詢我參加的合購
+
+- 路徑: `/api/v1/campaigns/my-joined`
+- Method: `GET`
+- Query:
+  - `page` `int`, optional, 預設 `0`
+  - `size` `int`, optional, 預設 `10`
+- Response: `Page<CampaignSummaryResponse>`
+
+---
+
+## 3. Reference Data API
+
+### 3.1 取得啟用中的賣場
+
+- 路徑: `/api/v1/stores`
+- Method: `GET`
+- 說明: 回傳所有 `isActive = true` 的賣場
+- Response: `List<StoreResponse>`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "內湖店",
+    "address": "台北市內湖區舊宗路一段 268 號",
+    "openTime": "10:00",
+    "closeTime": "21:30"
+  }
+]
+```
+
+### 3.2 取得分類清單
+
+- 路徑: `/api/v1/categories`
+- Method: `GET`
+- 說明: 依 `sortOrder` 升冪回傳分類
+- Response: `List<CategoryResponse>`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "生鮮",
+    "icon": "🥩"
+  }
+]
+```
+
+---
+
+## 4. Review API
+
+### 4.1 建立評價
+
+- 路徑: `/api/v1/reviews`
+- Method: `POST`
+- Request Body:
+
+```json
+{
+  "campaignId": 1,
+  "revieweeId": 2,
+  "rating": 5,
+  "comment": "交付準時，商品狀況良好"
+}
+```
+
+- 說明:
+  - 不可評自己
+  - `rating` 僅接受 `1` 到 `5`
+  - 同一組 `campaignId + reviewerId + revieweeId` 不可重複評價
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "評價成功，感謝您的回饋"
+}
+```
+
+---
+
+## 5. User API
+
+### 5.1 更新我的個人資料
+
+- 路徑: `/api/v1/users/me`
+- Method: `PUT`
+- Request Body:
+
+```json
+{
+  "displayName": "新暱稱",
+  "hasCostcoMembership": true
+}
+```
+
+- 說明: 兩個欄位皆可單獨更新，未提供的欄位不變
+- Response:
+
+```json
+{
+  "success": true,
+  "message": "個人資料更新成功"
+}
+```
+
+---
+
+## 6. 主要狀態補充
+
+### 6.1 Campaign 狀態
+
+- `OPEN`: 可參加
+- `FULL`: 已滿團
+- `DELIVERED`: 團主已交付，等待參與者確認
+- `COMPLETED`: 所有參與者已確認收貨
+- `CANCELLED`: 團主取消或系統釋放
+- `FAILED`: 已過期未成團
+- `HOST_NO_SHOW`: 團主超時未交付
+
+### 6.2 Participant 狀態
+
+- `JOINED`: 已參加
+- `CONFIRMED`: 已確認收貨
+- `CANCELLED`: 已退出或被釋放
