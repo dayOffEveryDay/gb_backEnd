@@ -1,6 +1,7 @@
 package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
+import com.costco.gb.dto.request.ReviseCampaignRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
@@ -230,24 +231,26 @@ public class CampaignService {
             throw new RuntimeException("認購數量必須大於 0");
         }
 
-        // 2. 🛡️ 核心防禦：原子性扣庫存 (先扣合購單的庫存，確保高併發下不會超賣)
+        // 2. 🛡️ 核心防禦：原子性扣庫存 (直接打資料庫)
         int updatedRows = campaignRepository.decrementQuantity(campaignId, request.getQuantity());
         if (updatedRows == 0) {
             throw new RuntimeException("剩餘數量不足。請確認認購數量或是是否已滿團。");
         }
 
-        // 3. ✨ 魔法修改區：檢查是否已經參加過？
+        // 🌟 關鍵修復：手動同步 Java 記憶體中的 Entity 狀態！
+        // 這樣 Hibernate 待會如果要做 save 或髒檢查時，拿到的就會是「已經扣掉」的正確數字。
+        campaign.setAvailableQuantity(campaign.getAvailableQuantity() - request.getQuantity());
+
+        // 3. ✨ 檢查是否已經參加過？(保持不變)
         Optional<Participant> optionalParticipant = participantRepository.findByCampaignIdAndUserId(campaignId, userId);
 
         if (optionalParticipant.isPresent()) {
-            // 情況 A：已經參加過了，我們幫他「追加數量」
             Participant existingParticipant = optionalParticipant.get();
             existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
             participantRepository.save(existingParticipant);
             log.info("User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
                     userId, campaignId, request.getQuantity(), existingParticipant.getQuantity());
         } else {
-            // 情況 B：第一次參加，建立全新的明細
             User user = userRepository.getReferenceById(userId);
             Participant newParticipant = Participant.builder()
                     .campaign(campaign)
@@ -259,13 +262,64 @@ public class CampaignService {
             log.info("User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
         }
 
-        // 4. 檢查是否滿單 (滿單則自動更改狀態)
-        int remaining = campaign.getAvailableQuantity() - request.getQuantity();
-        if (remaining == 0) {
+        // 4. 檢查是否滿單 (寫法變得更簡單了！)
+        // 因為我們前面已經同步了實體的數字，這裡直接檢查 getAvailableQuantity() 是否為 0 即可
+        if (campaign.getAvailableQuantity() == 0) {
             campaign.setStatus("FULL");
-            campaignRepository.save(campaign);
             log.info("合購單 {} 已達滿單狀態！", campaignId);
+
+            // 💡 其實在 @Transactional 的方法內，只要你 set 了值，
+            // 交易結束時 Hibernate 會自動幫你 save，所以下面這行甚至可以省略！
+            // campaignRepository.save(campaign);
         }
+    }
+
+    @Transactional
+    public void reviseCampaign(Long userId, Long campaignId, ReviseCampaignRequest request) {
+
+        // 1. 防呆檢查
+        if (request.getQuantity() <= 0) {
+            throw new RuntimeException("減少的數量必須大於 0");
+        }
+
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 只有在 OPEN (招募中) 或 FULL (已滿單) 的狀態下可以反悔減少數量。
+        // 如果已經面交或結案，就不能改了！
+        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
+            throw new RuntimeException("此合購單已進入處理階段或已結束，無法修改數量！");
+        }
+
+        // 2. 找出這個人的參團紀錄
+        Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, userId)
+                .orElseThrow(() -> new RuntimeException("您尚未加入此合購單！"));
+
+        // 3. 🛡️ 核心規則：減少後的數量不能低於 1
+        int newQuantity = participant.getQuantity() - request.getQuantity();
+        if (newQuantity < 1) {
+            throw new RuntimeException("減少後的數量不能低於 1！如果您想完全退出，請使用取消參團功能。");
+        }
+
+        // 4. 更新該團員的認購數量
+        participant.setQuantity(newQuantity);
+        participantRepository.save(participant);
+
+        // 5. 歸還庫存 (打向資料庫的原子操作)
+        campaignRepository.incrementQuantity(campaignId, request.getQuantity());
+
+        // 🌟 手動同步記憶體狀態 (避免 Hibernate 髒檢查把舊數字寫回去)
+        int currentAvailable = campaign.getAvailableQuantity() + request.getQuantity();
+        campaign.setAvailableQuantity(currentAvailable);
+
+        // 6. ✨ 狀態回朔魔法：如果原本滿單了，現在釋出名額，要自動變回招募中！
+        if ("FULL".equals(campaign.getStatus()) && currentAvailable > 0) {
+            campaign.setStatus("OPEN");
+            log.info("合購單 {} 因團員減少認購數量，釋出名額，從 FULL 恢復為 OPEN 狀態！", campaignId);
+        }
+
+        log.info("User {} 在合購單 {} 減少了數量: {}，目前總共認購: {}",
+                userId, campaignId, request.getQuantity(), newQuantity);
     }
     @Transactional
     public void withdrawCampaign(Long userId, Long campaignId) {

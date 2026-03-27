@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import com.costco.gb.dto.request.JoinCampaignRequest;
 import org.springframework.web.bind.annotation.PathVariable;
 import java.util.Map;
+import com.costco.gb.dto.request.ReviseCampaignRequest;
 
 @RestController
 @RequestMapping("/api/v1/campaigns")
@@ -68,7 +69,20 @@ public class CampaignController {
                 "message", "成功加入合購！"
         ));
     }
+    // 🌟 減少認購數量 (與 join 相反)
+    @PostMapping("/{id}/revise")
+    public ResponseEntity<?> reviseCampaign(
+            @PathVariable("id") Long campaignId,
+            @RequestBody ReviseCampaignRequest request,
+            @RequestAttribute("userId") Long userId) {
 
+        campaignService.reviseCampaign(userId, campaignId, request);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "修改成功！已為您減少認購數量。"
+        ));
+    }
     @PostMapping("/{id}/withdraw")
     public ResponseEntity<?> withdrawCampaign(@PathVariable("id") Long campaignId) {
 

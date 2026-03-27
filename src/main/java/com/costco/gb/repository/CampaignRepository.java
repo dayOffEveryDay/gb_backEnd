@@ -47,6 +47,12 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             "WHERE c.id = :campaignId AND c.availableQuantity >= :quantity AND c.status = 'OPEN'")
     int decrementQuantity(@Param("campaignId") Long campaignId, @Param("quantity") Integer quantity);
 
+
+    // 🌟 新增：安全地歸還庫存 (加回去)
+    @Modifying
+    @Query("UPDATE Campaign c SET c.availableQuantity = c.availableQuantity + :quantity WHERE c.id = :campaignId")
+    int incrementQuantity(@Param("campaignId") Long campaignId, @Param("quantity") Integer quantity);
+
     @Modifying
     @Query("UPDATE Campaign c SET c.availableQuantity = c.availableQuantity + :quantity, " +
             "c.status = 'OPEN' " + // 不管原本是 OPEN 還是 FULL，只要有人退，就一定是 OPEN
