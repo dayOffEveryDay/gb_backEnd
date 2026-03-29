@@ -1,6 +1,6 @@
 # Costco Group Buying - 資料庫設計 (Database Schema) v2.0
 
-本專案採用關聯式資料庫 (MySQL / PostgreSQL)，共設計 11 張核心實體表。
+本專案採用關聯式資料庫 (MySQL / PostgreSQL)，共設計 12 張核心實體表。
 *備註：所有資料表皆具備 `created_at` 與 `updated_at` (DATETIME) 系統自動維護之審計欄位。*
 
 ## 🏢 1. 基礎設定與實體店鋪 (Infrastructure)
@@ -102,7 +102,7 @@
 | `campaign_id` | BIGINT | FK (campaigns.id) | | 所屬合購單 |
 | `user_id` | BIGINT | FK (users.id) | | 參與者 |
 | `quantity` | INT | | | 認購數量 |
-| `status` | VARCHAR | | 'JOINED' | 狀態 (JOINED, CANCELLED, NO_SHOW) |
+| `status` | VARCHAR | | 'JOINED' | 狀態 (JOINED, CONFIRMED, CANCELLED, CANCELLED_BY_HOST, CANCELLED_BY_SYSTEM) |
 > ⚠️ **UNIQUE KEY (campaign_id, user_id):** 防止同一個人在同一單產生兩筆明細 (防連點)。
 
 ---
@@ -110,7 +110,7 @@
 ## 💬 4. 互動、通訊與評價 (Interactions & Logs)
 
 ### 4.1 `chat_messages` (聊天紀錄表)
-> ⚠️ 系統排程：保留 3 個月後自動刪除。
+> ⚠️ 本次工作區新增聊天室實作，聊天紀錄由 `ChatService` 寫入，預留排程於 3 個月後自動刪除。
 | 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
 | :--- | :--- | :--- | :--- | :--- |
 | `id` | BIGINT | PK, Auto Inc. | | |
@@ -128,10 +128,11 @@
 | `reviewee_id` | BIGINT | FK (users.id) | | 被評價者 |
 | `rating` | INT | CHECK (1-5) | | 星等 (1-5) |
 | `comment` | VARCHAR | | | 文字評論 |
+| `is_score_counted` | BOOLEAN | | FALSE | 是否已產生信用加分 (防刷單機制) |
 > ⚠️ **UNIQUE KEY (campaign_id, reviewer_id, reviewee_id):** 確保一單只能互評一次 (防洗評價)。
 
 ### 4.3 `notifications` (站內通知表)
-> ⚠️ 系統排程：保留過期後 7 天自動刪除。
+> ⚠️ 本次工作區新增滿單即時通知實作，資料先寫 DB，再用 WebSocket 推播到 `/user/queue/notifications`。過期後 7 天可由排程刪除。
 | 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
 | :--- | :--- | :--- | :--- | :--- |
 | `id` | BIGINT | PK, Auto Inc. | | |
@@ -141,3 +142,25 @@
 | `content` | VARCHAR | | | 推播文字內容 |
 | `is_read` | BOOLEAN | | FALSE | 是否已讀 |
 | `expire_time` | DATETIME | INDEX | NULL | 跟隨關聯團單的過期時間 |
+
+### 4.4 `credit_score_logs` (信用分數變動紀錄表 - 信用存摺)
+| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `id` | BIGINT | PK, Auto Inc. | | |
+| `user_id` | BIGINT | FK (users.id), INDEX | | 被異動分數的會員 |
+| `score_change` | INT | | | 異動分數 (+5, -10 等) |
+| `reason` | VARCHAR | | | 異動原因 (例：團主主動取消已成團合購單) |
+| `campaign_id` | BIGINT | FK (campaigns.id), NULL | NULL | 關聯的合購單 ID (可選，方便追溯) |
+> ⚠️ **INDEX (user_id, created_at):** 加速前端查詢歷史明細。
+
+---
+
+## 補充說明
+
+- 目前程式碼已新增 `ChatMessage`、`Notification` 對應 entity / repository / service。
+- 聊天室資料流:
+  - WebSocket 收到訊息後寫入 `chat_messages`
+  - REST `GET /api/v1/campaigns/{campaignId}/chat-messages` 讀取歷史訊息
+- 通知資料流:
+  - 合購滿單時建立 `notifications`
+  - 同時透過 `convertAndSendToUser` 即時推播給團主與團員

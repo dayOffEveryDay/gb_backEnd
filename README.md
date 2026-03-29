@@ -38,8 +38,8 @@
 * **狀態機與排程流局：** 後端利用定時排程（Scheduled Tasks）自動掃描並處理過期未滿單的合購，將其標示為流局。
 
 ### 3. 即時通訊與通知
-* **專屬聊天室：** 滿單後開放雙方對話，系統保留 3 個月對話紀錄以供潛在糾紛查證，排程自動清理舊訊息。
-* **站內小鈴鐺推播 (Web-only SSE)：** 節省外部 API 簡訊費用。推播具有時效性，過期通知在前端以灰階顯示，滿足使用者錯失恐懼（FOMO）的同時保持版面整潔，資料庫保留 7 天後自動刪除。
+* **專屬聊天室：** 工作區已新增 WebSocket + STOMP 聊天室實作，團主與團員可在同一張合購單底下即時對話，聊天紀錄寫入 `chat_messages`，並可透過 REST API 載入歷史訊息。
+* **站內小鈴鐺推播：** 工作區已新增滿單通知流程，合購滿單時會先寫入 `notifications`，再透過 WebSocket 單播到 `/user/queue/notifications`。
 
 ---
 
@@ -47,7 +47,7 @@
 
 * **前端 (Frontend):** React (SPA/PWA)
   * UI 偏好（如深色/淺色模式）儲存於 `localStorage`。
-  * 透過 Server-Sent Events (SSE) 接收全站即時通知。
+  * 即時功能目前以 WebSocket / STOMP 為主要方向。
 * **後端 (Backend):** Java Spring Boot
   * 採用 Event-Driven (事件驅動) 架構處理發單後的非同步通知配對，確保主執行緒極速回應。
 * **資料庫 (Database):** MySQL / PostgreSQL (RDS)

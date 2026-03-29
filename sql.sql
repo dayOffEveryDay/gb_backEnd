@@ -1,9 +1,8 @@
-
 -- CREATE SCHEMA `gbc` ;
 -- ==============================================================================
 -- 1. 基礎設定與實體店鋪 (Infrastructure)
 -- ==============================================================================
-USE `gbc`;
+USE `gkp`;
 CREATE TABLE stores (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL COMMENT '門市名稱 (例：中和店)',
@@ -103,7 +102,7 @@ CREATE TABLE users (
     display_name VARCHAR(255) NOT NULL COMMENT '顯示暱稱',
     profile_image_url VARCHAR(512) COMMENT '頭像連結',
     has_costco_membership BOOLEAN DEFAULT FALSE COMMENT '是否有好市多會員卡 (限制開團權限)',
-    
+
     -- 信用與交易指標
     credit_score INT DEFAULT 100 COMMENT '綜合信用評分 (受評價影響)',
     no_show_count INT DEFAULT 0 COMMENT '面交放鳥次數',
@@ -111,7 +110,7 @@ CREATE TABLE users (
     host_cancel_count INT DEFAULT 0 COMMENT '團主咎責取消次數 (算開團取消率)',
     total_joined_count INT DEFAULT 0 COMMENT '總參與成團數',
     participant_cancel_count INT DEFAULT 0 COMMENT '團員咎責反悔次數 (算跟團反悔率)',
-    
+
     status VARCHAR(50) DEFAULT 'ACTIVE' COMMENT '帳號狀態 (ACTIVE, SUSPENDED)',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -168,12 +167,12 @@ CREATE TABLE campaigns (
     meetup_location VARCHAR(255) COMMENT '預計面交地點',
     meetup_time DATETIME NULL COMMENT '預計面交時間',
     expire_time DATETIME NULL COMMENT '單據失效時間 (需做防呆限制)',
-    
+
     -- 交易咎責與取消機制
     status VARCHAR(50) DEFAULT 'OPEN' COMMENT '狀態 (OPEN, FULL, COMPLETED, EXPIRED, CANCEL_PENDING, CANCELLED)',
     blame_user_id BIGINT NULL COMMENT '若取消，歸咎於哪位會員 (記點用)',
     cancel_reason VARCHAR(255) NULL COMMENT '取消原因說明',
-    
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (host_id) REFERENCES users(id),
@@ -213,19 +212,28 @@ CREATE TABLE chat_messages (
     INDEX idx_created_at (created_at) -- 加速 3 個月排程清理
 );
 
+-- ==========================================
+-- 評價與防刷單紀錄表
+-- ==========================================
 CREATE TABLE reviews (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    campaign_id BIGINT NOT NULL COMMENT '發生交易的團單',
-    reviewer_id BIGINT NOT NULL COMMENT '評價者',
-    reviewee_id BIGINT NOT NULL COMMENT '被評價者',
-    rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5) COMMENT '星等 (1-5)',
-    comment VARCHAR(1000) COMMENT '文字評論',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    campaign_id BIGINT NOT NULL COMMENT '關聯的合購單 ID',
+    reviewer_id BIGINT NOT NULL COMMENT '給評價的人 (評分者)',
+    reviewee_id BIGINT NOT NULL COMMENT '收評價的人 (被評者)',
+    rating INT NOT NULL COMMENT '星等 (1~5)',
+    comment VARCHAR(255) COMMENT '文字評價內容',
+    is_score_counted BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否已產生信用加分 (防刷單機制)',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '評價時間',
+
+    -- 設定外鍵關聯 (如果合購單或會員被刪除，評價跟著刪除)
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
-    FOREIGN KEY (reviewer_id) REFERENCES users(id),
-    FOREIGN KEY (reviewee_id) REFERENCES users(id),
-    UNIQUE KEY unique_review (campaign_id, reviewer_id, reviewee_id) -- 一單只能互評一次
+    FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (reviewee_id) REFERENCES users(id) ON DELETE CASCADE,
+
+    -- 🌟 核心防護網加速器：針對 7 天防刷單查詢建立的複合索引
+    INDEX idx_anti_fraud (reviewer_id, reviewee_id, is_score_counted, created_at),
+    -- 防止同一人在同一單重複評價的約束
+    UNIQUE INDEX uk_campaign_reviewer_reviewee (campaign_id, reviewer_id, reviewee_id)
 );
 
 CREATE TABLE notifications (

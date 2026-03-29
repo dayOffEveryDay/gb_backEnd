@@ -37,6 +37,8 @@ public class CampaignService {
     private final ParticipantRepository participantRepository;
     private final String UPLOAD_DIR = "uploads/campaigns/";
     private final CreditScoreLogRepository creditScoreLogRepository; // 👈 加入這行
+    private final NotificationService notificationService; // 👈 加入這行
+
     // 🌟 注入 YML 裡的 base-url 參數
     @Value("${app.base-url}")
     private String baseUrl;
@@ -267,7 +269,8 @@ public class CampaignService {
         if (campaign.getAvailableQuantity() == 0) {
             campaign.setStatus("FULL");
             log.info("合購單 {} 已達滿單狀態！", campaignId);
-
+            // 🌟 觸發滿單通知推播！
+            notificationService.notifyCampaignFull(campaign);
             // 💡 其實在 @Transactional 的方法內，只要你 set 了值，
             // 交易結束時 Hibernate 會自動幫你 save，所以下面這行甚至可以省略！
             // campaignRepository.save(campaign);

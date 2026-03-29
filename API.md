@@ -1,11 +1,11 @@
 # API.md
 
-本文件整理目前專案 `gb_backEnd` 已實作的 API，內容以 `controller`、`dto` 與實際 service 行為為準。
+本文件整理目前 `gb_backEnd` 專案已實作、以及這次工作區新增但尚未提交的 API / WebSocket 介面。內容以 `controller`、`dto`、`service` 與目前程式碼行為為準。
 
 ## 共通說明
 
 - Base Path: `/api/v1`
-- 驗證方式: 除登入與基礎資料查詢外，其餘 API 需帶 `Authorization: Bearer <JWT_TOKEN>`
+- 驗證方式: 除登入與基礎資料查詢外，其餘 REST API 需帶 `Authorization: Bearer <JWT_TOKEN>`
 - 成功回傳格式:
   - 查詢型 API 直接回傳 DTO 或分頁物件
   - 動作型 API 多數回傳 `{ "success": true, "message": "..." }`
@@ -19,8 +19,9 @@
 
 - 路徑: `/api/v1/auth/line`
 - Method: `POST`
+- Content-Type: `application/json`
 - 說明: 以 LINE OAuth code 交換 access token，取得 LINE 使用者資料，建立或更新本地會員，最後回傳 JWT
-- Request Body: `application/json`
+- 請求參數:
 
 ```json
 {
@@ -29,7 +30,7 @@
 }
 ```
 
-- Response: `AuthResponse`
+- 返回內容: `AuthResponse`
 
 ```json
 {
@@ -51,7 +52,7 @@
 - Query:
   - `userId` `Long`, optional, 預設 `1`
 - 說明: 直接為指定 `userId` 產生 JWT，方便本機或測試環境驗證流程
-- Response:
+- 返回內容:
 
 ```json
 {
@@ -76,7 +77,7 @@
   - `page` `int`, optional, 預設 `0`
   - `size` `int`, optional, 預設 `10`
 - 說明: 取得符合條件的合購列表，依建立時間新到舊排序
-- Response: `Page<CampaignSummaryResponse>`
+- 返回內容: `Page<CampaignSummaryResponse>`
 
 ```json
 {
@@ -119,7 +120,7 @@
 - Method: `POST`
 - Content-Type: `multipart/form-data`
 - 說明: 建立新的合購單，可上傳最多 3 張圖片
-- Form 欄位:
+- 請求參數:
   - `storeId` `Integer`
   - `categoryId` `Integer`
   - `scenarioType` `String`
@@ -130,7 +131,7 @@
   - `meetupTime` `LocalDateTime`
   - `expireTime` `LocalDateTime`
   - `images` `List<MultipartFile>`, optional, 最多 3 張
-- Response:
+- 返回內容:
 
 ```json
 {
@@ -145,7 +146,8 @@
 - Method: `POST`
 - Path Variable:
   - `id` `Long`: 合購 ID
-- Request Body:
+- Content-Type: `application/json`
+- 請求參數:
 
 ```json
 {
@@ -153,8 +155,7 @@
 }
 ```
 
-- 說明: 以目前登入者身份參加合購，`quantity` 至少為 `1`
-- Response:
+- 返回內容:
 
 ```json
 {
@@ -169,7 +170,8 @@
 - Method: `POST`
 - Path Variable:
   - `id` `Long`: 合購 ID
-- Request Body:
+- Content-Type: `application/json`
+- 請求參數:
 
 ```json
 {
@@ -177,12 +179,11 @@
 }
 ```
 
-- 說明: 將目前使用者在該合購中的參與數量往下調整指定數量
-- 實際行為:
+- 說明:
   - `quantity` 必須大於 `0`
   - 修改後參與數量不得小於 `1`
-  - 若合購原本是 `FULL` 且釋出數量後有庫存，狀態會改回 `OPEN`
-- Response:
+  - 若原本滿單且釋出名額，狀態會從 `FULL` 回到 `OPEN`
+- 返回內容:
 
 ```json
 {
@@ -197,8 +198,8 @@
 - Method: `POST`
 - Path Variable:
   - `id` `Long`
-- 說明: 取消目前使用者在該合購中的參與
-- Response:
+- 說明: 取消目前使用者在該合購中的參與，會釋出庫存並累加 `participantCancelCount`
+- 返回內容:
 
 ```json
 {
@@ -214,7 +215,7 @@
 - Path Variable:
   - `id` `Long`
 - 說明: 僅團主可操作，且該合購必須為 `OPEN` 或 `FULL`
-- Response:
+- 返回內容:
 
 ```json
 {
@@ -229,8 +230,8 @@
 - Method: `POST`
 - Path Variable:
   - `id` `Long`
-- 說明: 參與者確認收貨後，自己的參與狀態會改成 `CONFIRMED`；若所有參與者都確認，合購狀態會改成 `COMPLETED`
-- Response:
+- 說明: 參與者確認收貨後，自身狀態變成 `CONFIRMED`；若所有團員都確認，整張單轉為 `COMPLETED`
+- 返回內容:
 
 ```json
 {
@@ -245,8 +246,8 @@
 - Method: `POST`
 - Path Variable:
   - `id` `Long`
-- 說明: 僅團主可取消 `OPEN` 或 `FULL` 狀態的合購；若已有參與者，會依狀態扣團主信用分並釋放參與者
-- Response:
+- 說明: 僅團主可取消 `OPEN` 或 `FULL` 狀態的合購；若已有團員，會依狀態扣團主信用分，並批次改寫團員狀態
+- 返回內容:
 
 ```json
 {
@@ -262,7 +263,7 @@
 - Query:
   - `page` `int`, optional, 預設 `0`
   - `size` `int`, optional, 預設 `10`
-- Response: `Page<CreditLogResponse>`
+- 返回內容: `Page<CreditLogResponse>`
 
 ```json
 {
@@ -270,11 +271,15 @@
     {
       "id": 1,
       "scoreChange": -10,
-      "reason": "超過 24 小時未交付，視為團主失約",
+      "reason": "超過 24 小時未處理，系統判定放鳥",
       "campaignId": 99,
       "createdAt": "2026-03-27T10:00:00"
     }
-  ]
+  ],
+  "totalPages": 1,
+  "totalElements": 1,
+  "size": 10,
+  "number": 0
 }
 ```
 
@@ -285,7 +290,7 @@
 - Query:
   - `page` `int`, optional, 預設 `0`
   - `size` `int`, optional, 預設 `10`
-- Response: `Page<CampaignSummaryResponse>`
+- 返回內容: `Page<CampaignSummaryResponse>`
 
 ### 2.11 查詢我參加的合購
 
@@ -294,7 +299,35 @@
 - Query:
   - `page` `int`, optional, 預設 `0`
   - `size` `int`, optional, 預設 `10`
-- Response: `Page<CampaignSummaryResponse>`
+- 返回內容: `Page<CampaignSummaryResponse>`
+
+### 2.12 取得聊天室歷史訊息
+
+- 路徑: `/api/v1/campaigns/{campaignId}/chat-messages`
+- Method: `GET`
+- Path Variable:
+  - `campaignId` `Long`
+- 說明:
+  - 僅團主或該團參與者可查看
+  - 依建立時間升冪回傳，舊訊息在前
+- 返回內容: `List<ChatMessageResponse>`
+
+```json
+[
+  {
+    "senderId": 2,
+    "senderName": "Howard",
+    "content": "我大概 7 點到",
+    "timestamp": "2026-03-29T18:30:15"
+  },
+  {
+    "senderId": 10,
+    "senderName": "Host A",
+    "content": "好，熟食區門口見",
+    "timestamp": "2026-03-29T18:31:08"
+  }
+]
+```
 
 ---
 
@@ -305,7 +338,7 @@
 - 路徑: `/api/v1/stores`
 - Method: `GET`
 - 說明: 回傳所有 `isActive = true` 的賣場
-- Response: `List<StoreResponse>`
+- 返回內容: `List<StoreResponse>`
 
 ```json
 [
@@ -324,7 +357,7 @@
 - 路徑: `/api/v1/categories`
 - Method: `GET`
 - 說明: 依 `sortOrder` 升冪回傳分類
-- Response: `List<CategoryResponse>`
+- 返回內容: `List<CategoryResponse>`
 
 ```json
 [
@@ -344,7 +377,8 @@
 
 - 路徑: `/api/v1/reviews`
 - Method: `POST`
-- Request Body:
+- Content-Type: `application/json`
+- 請求參數:
 
 ```json
 {
@@ -359,7 +393,7 @@
   - 不可評自己
   - `rating` 僅接受 `1` 到 `5`
   - 同一組 `campaignId + reviewerId + revieweeId` 不可重複評價
-- Response:
+- 返回內容:
 
 ```json
 {
@@ -376,7 +410,8 @@
 
 - 路徑: `/api/v1/users/me`
 - Method: `PUT`
-- Request Body:
+- Content-Type: `application/json`
+- 請求參數:
 
 ```json
 {
@@ -386,7 +421,7 @@
 ```
 
 - 說明: 兩個欄位皆可單獨更新，未提供的欄位不變
-- Response:
+- 返回內容:
 
 ```json
 {
@@ -397,20 +432,91 @@
 
 ---
 
-## 6. 主要狀態補充
+## 6. WebSocket / STOMP
 
-### 6.1 Campaign 狀態
+這次工作區新增了聊天室與即時通知推播，通訊方式不是 REST，而是 STOMP over WebSocket。
+
+### 6.1 建立 WebSocket 連線
+
+- 端點: `/ws`
+- 協定: WebSocket + SockJS fallback
+- 連線 Header:
+  - `Authorization: Bearer <JWT_TOKEN>`
+- 說明:
+  - 前端先連到 `/ws`
+  - 後端 `application destination prefix` 為 `/app`
+  - 群播 broker prefix 為 `/topic`
+  - 個人通知 broker prefix 為 `/user/queue`
+
+### 6.2 發送聊天室訊息
+
+- Send Destination: `/app/chat/{campaignId}/sendMessage`
+- 對應後端: `@MessageMapping("/chat/{campaignId}/sendMessage")`
+- 請求參數: `ChatMessageRequest`
+
+```json
+{
+  "content": "我五分鐘後到"
+}
+```
+
+- 返回內容 / 廣播內容: `ChatMessageResponse`
+- Broadcast Topic: `/topic/campaigns/{campaignId}`
+
+```json
+{
+  "senderId": 2,
+  "senderName": "Howard",
+  "content": "我五分鐘後到",
+  "timestamp": "2026-03-29T18:45:20"
+}
+```
+
+### 6.3 訂閱聊天室
+
+- Subscribe Topic: `/topic/campaigns/{campaignId}`
+- 說明: 成功送出訊息後，後端會把 `ChatMessageResponse` 廣播到該團聊天室頻道
+
+### 6.4 訂閱個人通知
+
+- Subscribe Topic: `/user/queue/notifications`
+- 說明:
+  - 當合購因認購而滿單時，`NotificationService` 會寫入 `notifications` 資料表
+  - 同時透過 `convertAndSendToUser` 推播給團主與所有團員
+- 廣播內容範例:
+
+```json
+{
+  "content": "您參與的合購單「鮭魚切片」已成團！請隨時留意聊天室訊息。",
+  "type": "CAMPAIGN_FULL",
+  "referenceId": 101
+}
+```
+
+### 6.5 驗證流程
+
+- `WebSocketAuthInterceptor` 會在 STOMP `CONNECT` 時解析 JWT
+- `WebSocketConfig` 已將 interceptor 註冊到 inbound channel
+- 驗證成功後會把 `userId` 放進 WebSocket session，供聊天室發言時使用
+
+---
+
+## 7. 狀態補充
+
+### 7.1 Campaign 狀態
 
 - `OPEN`: 可參加
 - `FULL`: 已滿團
 - `DELIVERED`: 團主已交付，等待參與者確認
 - `COMPLETED`: 所有參與者已確認收貨
-- `CANCELLED`: 團主取消或系統釋放
+- `CANCELLED`: 團主取消
 - `FAILED`: 已過期未成團
-- `HOST_NO_SHOW`: 團主超時未交付
+- `HOST_NO_SHOW`: 團主超時未處理
 
-### 6.2 Participant 狀態
+### 7.2 Participant 狀態
 
 - `JOINED`: 已參加
 - `CONFIRMED`: 已確認收貨
-- `CANCELLED`: 已退出或被釋放
+- `CANCELLED`: 主動退出
+- `CANCELLED_BY_HOST`: 團主取消後由系統批次釋放
+- `CANCELLED_BY_SYSTEM`: 團主超時未處理後由系統批次釋放

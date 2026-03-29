@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
@@ -18,4 +19,6 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     // 系統排程用：刪除過期超過 7 天的通知
     void deleteByExpireTimeBefore(LocalDateTime cutoffDate);
+
+    List<Notification> findByUserIdAndIsReadFalseOrderByCreatedAtDesc(Long userId);
 }

@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -17,6 +18,8 @@ public interface ParticipantRepository extends JpaRepository<Participant, Long> 
     // 檢查某個使用者是否已經加入過這個合購單 (防連點防呆)
     Optional<Participant> findByCampaignIdAndUserId(Long campaignId, Long userId);
 
+    // 🌟 新增這個！用來撈出這張合購單「所有」的團員 (發送滿單通知時會用到)
+    List<Participant> findByCampaignId(Long campaignId);
     // 我的跟團紀錄：查詢某位使用者參與的所有單
     Page<Participant> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
 
