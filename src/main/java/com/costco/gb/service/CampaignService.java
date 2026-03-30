@@ -2,7 +2,10 @@ package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.request.ReviseCampaignRequest;
+import com.costco.gb.dto.request.ReviseHostQuantityRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
+import com.costco.gb.dto.response.HostDashboardResponse;
+import com.costco.gb.dto.response.MyParticipationResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -65,11 +68,15 @@ public class CampaignService {
         // 1. 驗證團主身分與開團權限
         User host = userRepository.findById(hostId)
                 .orElseThrow(() -> new RuntimeException("找不到使用者"));
-
+        // 🧠 系統自動計算團主自留數量
+        int calculatedReserved = request.getProductTotalQuantity() - request.getOpenQuantity();
         if (!host.getHasCostcoMembership()) {
             throw new RuntimeException("拒絕存取：必須擁有好市多會員卡才能發起合購！");
         }
-
+        // 🛡️ 防呆：開放的數量不能大於商品總數！
+        if (request.getOpenQuantity() > request.getProductTotalQuantity()) {
+            throw new IllegalArgumentException("開放合購的數量不能大於商品總數！");
+        }
         // 2. 取得並驗證關聯實體 (門市與分類)
         Store store = storeRepository.findById(request.getStoreId())
                 .orElseThrow(() -> new RuntimeException("找不到指定的門市"));
@@ -129,8 +136,9 @@ public class CampaignService {
                     .itemName(request.getItemName())
                     .imageUrls(imageUrlsString) // 💡 存入 UUID 圖片字串
                     .pricePerUnit(request.getPricePerUnit())
-                    .totalQuantity(request.getTotalQuantity())
-                    .availableQuantity(request.getTotalQuantity()) // 初始剩餘數量 = 總數量
+                    .totalQuantity(request.getOpenQuantity())      // 資料庫的 total 是指「這團總共賣多少」
+                    .availableQuantity(request.getOpenQuantity())  // 剛開團，剩餘 = 總共賣的
+                    .hostReservedQuantity(calculatedReserved)      // 存入我們剛剛算好的自留數！
                     .meetupLocation(request.getMeetupLocation())
                     .meetupTime(request.getMeetupTime())
                     .expireTime(request.getExpireTime())
@@ -210,6 +218,105 @@ public class CampaignService {
                         .build())
                 .build();
     }
+
+    // 🌟 團主專用：修改合購單數量
+    @Transactional
+    public void reviseCampaignByHost(Long hostId, Long campaignId, ReviseHostQuantityRequest request) {
+
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 🛡️ 防護 1：驗證身分，只有團主本人可以改！
+        if (!campaign.getHost().getId().equals(hostId)) {
+            throw new RuntimeException("權限不足：您不是此合購單的團主！");
+        }
+
+        // 🛡️ 防護 2：合購單狀態必須是 OPEN 才能改
+        if (!"OPEN".equals(campaign.getStatus())) {
+            throw new RuntimeException("合購單已滿單或關閉，無法修改數量！");
+        }
+
+        if (request.getNewOpenQuantity() > request.getNewProductTotalQuantity()) {
+            throw new IllegalArgumentException("開放合購的數量不能大於商品總數！");
+        }
+
+        // 🧠 核心數學運算：
+        // 算出已經被團員買走的數量 = 舊的開放總數 - 舊的剩餘數量
+        int alreadySoldQuantity = campaign.getTotalQuantity() - campaign.getAvailableQuantity();
+
+        // 🛡️ 防護 3：如果團主想把開放數量縮小，但新的開放數量竟然比「已經賣掉的」還少，絕對要擋下！
+        if (request.getNewOpenQuantity() < alreadySoldQuantity) {
+            throw new RuntimeException("修改失敗！目前已認購的數量 (" + alreadySoldQuantity + ") 超過您設定的新開放數量！請先請團員退出或維持原數量。");
+        }
+
+        // ✨ 計算新的自留數與新的剩餘數
+        int newCalculatedReserved = request.getNewProductTotalQuantity() - request.getNewOpenQuantity();
+        int newAvailableQuantity = request.getNewOpenQuantity() - alreadySoldQuantity;
+
+        // 更新資料庫
+        campaign.setTotalQuantity(request.getNewOpenQuantity());
+        campaign.setAvailableQuantity(newAvailableQuantity);
+        campaign.setHostReservedQuantity(newCalculatedReserved);
+
+        // 如果修改後剛好剩餘數量變成 0，自動觸發滿單！
+        if (newAvailableQuantity == 0) {
+            campaign.setStatus("FULL");
+            log.info("合購單 {} 因團主修改數量，觸發滿單狀態！", campaignId);
+            // 這裡可以呼叫 notificationService.notifyCampaignFull(campaign);
+        }
+
+        campaignRepository.save(campaign);
+        log.info("團主 {} 成功修改合購單 {} 的數量配置。新自留: {}, 新開放: {}",
+                hostId, campaignId, newCalculatedReserved, request.getNewOpenQuantity());
+    }
+
+
+    // 🌟 團主專屬：取得合購單完整儀表板 (包含乘客名單)
+    @Transactional(readOnly = true)
+    public HostDashboardResponse getCampaignDashboardForHost(Long hostId, Long campaignId) {
+
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 🛡️ 防護：確保來看這張單的人，真的是這張單的團主！
+        if (!campaign.getHost().getId().equals(hostId)) {
+            throw new RuntimeException("權限不足：您不是此合購單的團主，無法查看儀表板！");
+        }
+
+        // 1. 撈取所有曾經加入過這張單的團員 (這裡用 findAllByCampaignId，不用濾掉 CANCELLED，讓團主看得到誰跳車)
+        // 💡 注意：如果你之前的 ParticipantRepository 沒有 findByCampaignId 方法，請記得去補上喔！
+        List<Participant> allParticipants = participantRepository.findByCampaignId(campaignId);
+
+        // 2. 將團員名單轉換成 DTO
+        List<HostDashboardResponse.ParticipantDetail> participantDetails = allParticipants.stream()
+                .map(p -> HostDashboardResponse.ParticipantDetail.builder()
+                        .userId(p.getUser().getId())
+                        .displayName(p.getUser().getDisplayName() != null ? p.getUser().getDisplayName() : "匿名會員")
+                        .quantity(p.getQuantity())
+                        .status(p.getStatus()) // 讓團主知道這個人是 JOINED 還是 CANCELLED
+                        .build())
+                .toList();
+
+        // 3. 計算各項庫存數據
+        int openQty = campaign.getTotalQuantity(); // 我們存的 total 就是開放數量
+        int reservedQty = campaign.getHostReservedQuantity();
+        int availableQty = campaign.getAvailableQuantity();
+        int soldQty = openQty - availableQty; // 已賣出 = 開放數 - 剩餘數
+
+        // 4. 打包回傳
+        return HostDashboardResponse.builder()
+                .campaignId(campaign.getId())
+                .itemName(campaign.getItemName())
+                .status(campaign.getStatus())
+                .totalPhysicalQuantity(openQty + reservedQty) // 還原當初填的商品總數
+                .openQuantity(openQty)
+                .hostReservedQuantity(reservedQty)
+                .alreadySoldQuantity(soldQty)
+                .availableQuantity(availableQty)
+                .participants(participantDetails)
+                .build();
+    }
+
     @Transactional
     public void joinCampaign(Long userId, Long campaignId, JoinCampaignRequest request) {
 
@@ -243,24 +350,41 @@ public class CampaignService {
         // 這樣 Hibernate 待會如果要做 save 或髒檢查時，拿到的就會是「已經扣掉」的正確數字。
         campaign.setAvailableQuantity(campaign.getAvailableQuantity() - request.getQuantity());
 
-        // 3. ✨ 檢查是否已經參加過？(保持不變)
+        // 🌟 這裡故意不加 AndStatus，因為我們要連他「過去取消的紀錄」一起撈出來檢查！
         Optional<Participant> optionalParticipant = participantRepository.findByCampaignIdAndUserId(campaignId, userId);
 
         if (optionalParticipant.isPresent()) {
             Participant existingParticipant = optionalParticipant.get();
-            existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
+
+            // 🛡️ 判斷 1：他是不是曾經跳車，現在要「重新上車」？
+            if ("CANCELLED".equals(existingParticipant.getStatus())) {
+                existingParticipant.setStatus("JOINED"); // 🌟 狀態復活！
+                existingParticipant.setQuantity(request.getQuantity()); // 數量不累加，直接覆蓋成這次要求的新數量
+
+                log.info("User {} 重新加入了合購單 {} (狀態復活)，數量: {}",
+                        userId, campaignId, request.getQuantity());
+            }
+            // 🛡️ 判斷 2：他原本就在車上，只是要「追加數量」
+            else {
+                existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
+
+                log.info("User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
+                        userId, campaignId, request.getQuantity(), existingParticipant.getQuantity());
+            }
+
             participantRepository.save(existingParticipant);
-            log.info("User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
-                    userId, campaignId, request.getQuantity(), existingParticipant.getQuantity());
+
         } else {
+            // 🛡️ 判斷 3：他是首購族，資料庫完全沒有他的紀錄
             User user = userRepository.getReferenceById(userId);
             Participant newParticipant = Participant.builder()
                     .campaign(campaign)
                     .user(user)
                     .quantity(request.getQuantity())
-                    .status("JOINED")
+                    .status("JOINED") // 預設狀態為加入
                     .build();
             participantRepository.save(newParticipant);
+
             log.info("User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
         }
 
@@ -360,7 +484,7 @@ public class CampaignService {
         // 5. ⚠️ 信用記點：增加該使用者的「反悔次數」
         User user = userRepository.findById(userId).orElseThrow();
         user.setParticipantCancelCount(user.getParticipantCancelCount() + 1);
-        // (V2 進階：如果反悔次數過高，可以在這裡順便扣他的 creditScore 信用分數)
+        // (TODO V2 進階：如果反悔次數過高，可以在這裡順便扣他的 creditScore 信用分數)
         userRepository.save(user);
 
         // 6. 紀錄 MDC TraceId 追蹤日誌
@@ -539,6 +663,35 @@ public class CampaignService {
         // 4. 最終將這張單設為取消狀態
         campaign.setStatus("CANCELLED");
         campaignRepository.save(campaign);
+    }
+    @Transactional(readOnly = true)
+    public MyParticipationResponse getMyParticipation(Long campaignId, Long userId) {
+
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        boolean isHost = campaign.getHost().getId().equals(userId);
+
+        if (isHost) {
+            return MyParticipationResponse.builder()
+                    .isHost(true)
+                    .isJoined(true)
+                    .quantity(campaign.getHostReservedQuantity())
+                    .build();
+        }
+
+        // 🌟 修正：這裡改用 AndStatus，只抓狀態是 'JOINED' 的紀錄！
+        return participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, userId, "JOINED")
+                .map(participant -> MyParticipationResponse.builder()
+                        .isHost(false)
+                        .isJoined(true) // 確定有 JOINED 紀錄才算已參加
+                        .quantity(participant.getQuantity())
+                        .build())
+                .orElseGet(() -> MyParticipationResponse.builder()
+                        .isHost(false)
+                        .isJoined(false) // 如果被 CANCELLED 了，這裡就會找不到，變成未參加！
+                        .quantity(0)
+                        .build());
     }
 
 }

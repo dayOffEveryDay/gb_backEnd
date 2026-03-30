@@ -4,6 +4,7 @@ import com.costco.gb.dto.response.ChatMessageResponse;
 import com.costco.gb.service.ChatService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,8 +19,11 @@ public class ChatRestController {
     // 🌟 載入歷史聊天紀錄
     @GetMapping
     public ResponseEntity<List<ChatMessageResponse>> getChatHistory(
-            @PathVariable("campaignId") Long campaignId,
-            @RequestAttribute("userId") Long userId) {
+            @PathVariable("campaignId") Long campaignId) {
+
+        // 從 Spring Security Context 取出當前使用者 ID (與你的 ReviewController 寫法一致！)
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
 
         List<ChatMessageResponse> history = chatService.getChatHistory(userId, campaignId);
 

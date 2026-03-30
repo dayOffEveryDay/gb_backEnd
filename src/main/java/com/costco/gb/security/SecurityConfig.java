@@ -51,6 +51,8 @@ public class SecurityConfig {
                         // 列表與明細大家都能看，但 POST (發起開團)、PUT/DELETE (修改狀態) 不在此限
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns/*").permitAll()
+                        // 讓 WebSocket 的握手請求無條件通過！
+                        .requestMatchers("/ws/**").permitAll()
                         // 4. 【其他所有的 API 呼叫】 (包含 /join, /withdraw, /reviews 等)
                         // 預設全部攔截，必須攜帶合法的 JWT Token 才能通行
                         .anyRequest().authenticated()

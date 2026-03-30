@@ -102,7 +102,7 @@ CREATE TABLE users (
     display_name VARCHAR(255) NOT NULL COMMENT '顯示暱稱',
     profile_image_url VARCHAR(512) COMMENT '頭像連結',
     has_costco_membership BOOLEAN DEFAULT FALSE COMMENT '是否有好市多會員卡 (限制開團權限)',
-
+    
     -- 信用與交易指標
     credit_score INT DEFAULT 100 COMMENT '綜合信用評分 (受評價影響)',
     no_show_count INT DEFAULT 0 COMMENT '面交放鳥次數',
@@ -110,7 +110,7 @@ CREATE TABLE users (
     host_cancel_count INT DEFAULT 0 COMMENT '團主咎責取消次數 (算開團取消率)',
     total_joined_count INT DEFAULT 0 COMMENT '總參與成團數',
     participant_cancel_count INT DEFAULT 0 COMMENT '團員咎責反悔次數 (算跟團反悔率)',
-
+    
     status VARCHAR(50) DEFAULT 'ACTIVE' COMMENT '帳號狀態 (ACTIVE, SUSPENDED)',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -153,34 +153,36 @@ CREATE TABLE blocks (
 -- 3. 合購與認購核心 (Campaigns & Orders)
 -- ==============================================================================
 
-CREATE TABLE campaigns (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    host_id BIGINT NOT NULL COMMENT '開團者 ID',
-    category_id INT NOT NULL COMMENT '商品分類 ID',
-    store_id INT NOT NULL COMMENT '關聯 stores 表 ID',
-    scenario_type VARCHAR(50) NOT NULL COMMENT '開團情境 (INSTANT, SCHEDULED)',
-    item_name VARCHAR(255) NOT NULL COMMENT '商品名稱',
-    image_urls VARCHAR(512) COMMENT '現場商品圖片檔名(多張以逗號分隔)',
-    price_per_unit INT COMMENT '預估單份金額',
-    total_quantity INT NOT NULL COMMENT '總共分出數量',
-    available_quantity INT NOT NULL COMMENT '剩餘可認購數量 (與 Redis 同步)',
-    meetup_location VARCHAR(255) COMMENT '預計面交地點',
-    meetup_time DATETIME NULL COMMENT '預計面交時間',
-    expire_time DATETIME NULL COMMENT '單據失效時間 (需做防呆限制)',
-
-    -- 交易咎責與取消機制
-    status VARCHAR(50) DEFAULT 'OPEN' COMMENT '狀態 (OPEN, FULL, COMPLETED, EXPIRED, CANCEL_PENDING, CANCELLED)',
-    blame_user_id BIGINT NULL COMMENT '若取消，歸咎於哪位會員 (記點用)',
-    cancel_reason VARCHAR(255) NULL COMMENT '取消原因說明',
-
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (host_id) REFERENCES users(id),
-    FOREIGN KEY (category_id) REFERENCES categories(id),
-    FOREIGN KEY (store_id) REFERENCES stores(id),
-    FOREIGN KEY (blame_user_id) REFERENCES users(id),
-    INDEX idx_store_status_expire (store_id, status, expire_time) -- 首頁查詢最佳化
-);
+CREATE TABLE `campaigns` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `host_id` bigint NOT NULL COMMENT '開團者 ID',
+  `category_id` int NOT NULL COMMENT '商品分類 ID',
+  `store_id` int NOT NULL COMMENT '關聯 stores 表 ID',
+  `scenario_type` varchar(50) NOT NULL COMMENT '開團情境 (INSTANT, SCHEDULED)',
+  `item_name` varchar(255) NOT NULL COMMENT '商品名稱',
+  `image_urls` varchar(1000) DEFAULT NULL COMMENT '存放圖片UUID，多張以逗號分隔',
+  `price_per_unit` int DEFAULT NULL COMMENT '預估單份金額',
+  `total_quantity` int NOT NULL COMMENT '總共分出數量',
+  `available_quantity` int NOT NULL COMMENT '剩餘可認購數量 (與 Redis 同步)',
+  `host_reserved_quantity` int NOT NULL DEFAULT '0' COMMENT '團主自留數量',
+  `meetup_location` varchar(255) DEFAULT NULL COMMENT '預計面交地點',
+  `meetup_time` datetime DEFAULT NULL COMMENT '預計面交時間',
+  `expire_time` datetime DEFAULT NULL COMMENT '單據失效時間 (需做防呆限制)',
+  `status` varchar(50) DEFAULT 'OPEN' COMMENT '狀態 (OPEN, FULL, COMPLETED, EXPIRED, CANCEL_PENDING, CANCELLED)',
+  `blame_user_id` bigint DEFAULT NULL COMMENT '若取消，歸咎於哪位會員 (記點用)',
+  `cancel_reason` varchar(255) DEFAULT NULL COMMENT '取消原因說明',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `host_id` (`host_id`),
+  KEY `category_id` (`category_id`),
+  KEY `blame_user_id` (`blame_user_id`),
+  KEY `idx_store_status_expire` (`store_id`,`status`,`expire_time`),
+  CONSTRAINT `campaigns_ibfk_1` FOREIGN KEY (`host_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `campaigns_ibfk_2` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`),
+  CONSTRAINT `campaigns_ibfk_3` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`),
+  CONSTRAINT `campaigns_ibfk_4` FOREIGN KEY (`blame_user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE participants (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

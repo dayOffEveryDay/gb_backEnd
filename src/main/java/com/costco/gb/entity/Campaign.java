@@ -41,6 +41,9 @@ public class Campaign extends BaseEntity {
     @Column(nullable = false)
     private Integer availableQuantity;
 
+    @Column(name = "host_reserved_quantity", nullable = false)
+    private Integer hostReservedQuantity;
+
     private String meetupLocation;
 
     private LocalDateTime meetupTime;

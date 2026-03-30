@@ -15,11 +15,16 @@ import java.util.Optional;
 @Repository
 public interface ParticipantRepository extends JpaRepository<Participant, Long> {
 
-    // 檢查某個使用者是否已經加入過這個合購單 (防連點防呆)
-    Optional<Participant> findByCampaignIdAndUserId(Long campaignId, Long userId);
+    // (連 CANCELLED 也會抓出來)
+     Optional<Participant> findByCampaignIdAndUserId(Long campaignId, Long userId);
 
-    // 🌟 新增這個！用來撈出這張合購單「所有」的團員 (發送滿單通知時會用到)
     List<Participant> findByCampaignId(Long campaignId);
+
+    // ✅ 修正版 1：專門抓「還在車上 (狀態為 JOINED)」的參團紀錄
+    Optional<Participant> findByCampaignIdAndUserIdAndStatus(Long campaignId, Long userId, String status);
+
+    // ✅ 修正版 2：撈出這張合購單「所有未取消」的團員 (發送滿單通知時要用這個，不然跳車的人也會收到通知！)
+    List<Participant> findByCampaignIdAndStatus(Long campaignId, String status);
     // 我的跟團紀錄：查詢某位使用者參與的所有單
     Page<Participant> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
 

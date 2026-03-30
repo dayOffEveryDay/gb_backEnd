@@ -25,9 +25,11 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             String status, LocalDateTime now, Pageable pageable);
     // 團主個人頁面：查詢某位團主發起的所有合購單 (依建立時間倒序)
     Page<Campaign> findByHostIdOrderByCreatedAtDesc(Long hostId, Pageable pageable);
-    // 🌟  查詢「我參與的合購單」(我跟的團)
-    // 透過 Participant 明細表反向找回 Campaign 主單，並依據合購單建立時間倒序
-    @Query("SELECT p.campaign FROM Participant p WHERE p.user.id = :userId ORDER BY p.campaign.createdAt DESC")
+
+    // 🌟 修正版：撈取「我跟的團」，必須確保 Participant 的狀態是 JOINED！
+    @Query("SELECT c FROM Campaign c JOIN Participant p ON c.id = p.campaign.id " +
+            "WHERE p.user.id = :userId AND p.status = 'JOINED' " +
+            "ORDER BY c.createdAt DESC")
     Page<Campaign> findJoinedCampaignsByUserId(@Param("userId") Long userId, Pageable pageable);
 
     // 支援動態條件的超強大查詢 (如果參數傳 null，該條件就會自動被忽略)

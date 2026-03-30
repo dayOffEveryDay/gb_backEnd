@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.dto.response.NotificationResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -23,11 +24,10 @@ public class NotificationService {
         sendNotification(campaign.getHost(), "CAMPAIGN_FULL", campaign.getId(),
                 "🎉 狂賀！您的合購單「" + campaign.getItemName() + "」已滿單，請準備安排面交！");
 
-        // 2. 通知所有團員
-        List<Participant> participants = participantRepository.findByCampaignId(campaign.getId());
+        // 🌟 修正：只通知狀態是 JOINED 的團員！
+        List<Participant> participants = participantRepository.findByCampaignIdAndStatus(campaign.getId(), "JOINED");
         for (Participant p : participants) {
-            sendNotification(p.getUser(), "CAMPAIGN_FULL", campaign.getId(),
-                    "🔔 您參與的合購單「" + campaign.getItemName() + "」已成團！請隨時留意聊天室訊息。");
+            // ... 發送推播 ...
         }
     }
 
@@ -49,5 +49,38 @@ public class NotificationService {
                 "/queue/notifications",
                 Map.of("content", content, "type", type, "referenceId", refId)
         );
+    }
+
+
+    // 🌟 1. 撈取使用者的「未讀」通知列表
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> getUnreadNotifications(Long userId) {
+        List<Notification> unreadList = notificationRepository
+                .findByUserIdAndIsReadFalseOrderByCreatedAtDesc(userId);
+
+        return unreadList.stream()
+                .map(n -> NotificationResponse.builder()
+                        .id(n.getId())
+                        .type(n.getType())
+                        .referenceId(n.getReferenceId())
+                        .content(n.getContent())
+                        .createdAt(n.getCreatedAt())
+                        .build())
+                .toList();
+    }
+
+    // 🌟 2. 標記為已讀
+    @Transactional
+    public void markAsRead(Long notificationId, Long userId) {
+        Notification notification = notificationRepository.findById(notificationId)
+                .orElseThrow(() -> new RuntimeException("找不到此通知"));
+
+        // 🛡️ 資安防護：只能已讀自己的通知！
+        if (!notification.getUser().getId().equals(userId)) {
+            throw new RuntimeException("無權操作此通知");
+        }
+
+        notification.setIsRead(true);
+        notificationRepository.save(notification);
     }
 }

@@ -10,9 +10,9 @@ public class CreateCampaignRequest {
     private Integer categoryId;
     private String scenarioType; // "INSTANT" (即時) 或 "SCHEDULED" (預約)
     private String itemName;
-//    private String itemImageUrl;
     private Integer pricePerUnit;
-    private Integer totalQuantity;
+    private Integer productTotalQuantity; // 商品原始總數 (例如: 36)
+    private Integer openQuantity;         // 願意開放給別人買的數量 (例如: 20)
     private String meetupLocation;
     private LocalDateTime meetupTime;
     private LocalDateTime expireTime;

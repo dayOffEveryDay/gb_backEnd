@@ -1,8 +1,10 @@
 package com.costco.gb.controller;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
+import com.costco.gb.dto.request.ReviseHostQuantityRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
 import com.costco.gb.dto.response.CreditLogResponse;
+import com.costco.gb.dto.response.HostDashboardResponse;
 import com.costco.gb.service.CampaignService;
 import com.costco.gb.service.UserService;
 import jakarta.validation.Valid;
@@ -15,6 +17,8 @@ import com.costco.gb.dto.request.JoinCampaignRequest;
 import org.springframework.web.bind.annotation.PathVariable;
 import java.util.Map;
 import com.costco.gb.dto.request.ReviseCampaignRequest;
+import com.costco.gb.dto.response.MyParticipationResponse;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @RestController
 @RequestMapping("/api/v1/campaigns")
@@ -49,6 +53,24 @@ public class CampaignController {
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "合購單發起成功！"
+        ));
+    }
+
+    // 🌟 團主專用：修改合購單總數與開放數量
+    @PutMapping("/{id}/host-revise")
+    public ResponseEntity<?> reviseCampaignByHost(
+            @PathVariable("id") Long campaignId,
+            @RequestBody ReviseHostQuantityRequest request) {
+
+        // ✨ 統一用 Spring Security Context 抓取當前登入者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long hostId = Long.parseLong(userIdStr);
+
+        campaignService.reviseCampaignByHost(hostId, campaignId, request);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "合購單數量配置修改成功！"
         ));
     }
 
@@ -178,4 +200,31 @@ public class CampaignController {
         Page<CampaignSummaryResponse> response = campaignService.getMyJoinedCampaigns(userId, pageable);
         return ResponseEntity.ok(response);
     }
+
+    // 🌟 團主專用：查看我的合購單儀表板與乘客名單
+    @GetMapping("/{id}/host-dashboard")
+    public ResponseEntity<HostDashboardResponse> getHostDashboard(@PathVariable("id") Long campaignId) {
+
+        // ✨ 統一用 Spring Security Context 抓取當前登入者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long hostId = Long.parseLong(userIdStr);
+
+        HostDashboardResponse response = campaignService.getCampaignDashboardForHost(hostId, campaignId);
+
+        return ResponseEntity.ok(response);
+    }
+
+    // 🌟 取得「我」在這張合購單的認購數量
+    @GetMapping("/{id}/participants/me")
+    public ResponseEntity<MyParticipationResponse> getMyParticipation(@PathVariable("id") Long campaignId) {
+
+        // 從 Token 抓取當前登入者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
+
+        MyParticipationResponse response = campaignService.getMyParticipation(campaignId, userId);
+
+        return ResponseEntity.ok(response);
+    }
+
 }

@@ -1,41 +1,83 @@
 # API.md
 
-本文件整理目前 `gb_backEnd` 專案已實作、以及這次工作區新增但尚未提交的 API / WebSocket 介面。內容以 `controller`、`dto`、`service` 與目前程式碼行為為準。
+本文檔依目前 `gb_backEnd` 程式碼實作整理，內容以 `controller`、`dto`、`security`、`websocket` 設定為準。
 
-## 共通說明
+## 基本說明
 
 - Base Path: `/api/v1`
-- 驗證方式: 除登入與基礎資料查詢外，其餘 REST API 需帶 `Authorization: Bearer <JWT_TOKEN>`
-- 成功回傳格式:
-  - 查詢型 API 直接回傳 DTO 或分頁物件
-  - 動作型 API 多數回傳 `{ "success": true, "message": "..." }`
-- 錯誤處理: 由全域例外處理器統一回傳錯誤內容
+- 伺服器連接埠：`8080`
+- 圖片存取前綴：`/images/**`
+- WebSocket STOMP 端點：`/ws`
+- REST API 預設回傳 `application/json`
 
----
+## 驗證規則
+
+以下介面可匿名存取：
+
+- `POST /api/v1/auth/line`
+- `GET /api/v1/auth/dev-login`
+- `GET /api/v1/stores`
+- `GET /api/v1/categories`
+- `GET /api/v1/campaigns`
+- `/images/**`
+- `/ws/**`
+
+其餘 REST API 都需要帶入：
+
+```http
+Authorization: Bearer <JWT_TOKEN>
+```
+
+## 通用錯誤格式
+
+業務錯誤通常回傳 `400 Bad Request`：
+
+```json
+{
+  "timestamp": "2026-03-30T12:00:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "錯誤訊息",
+  "path": "/api/v1/xxx"
+}
+```
+
+驗證錯誤也會回傳 `400`：
+
+```json
+{
+  "timestamp": "2026-03-30T12:00:00",
+  "status": 400,
+  "error": "Validation Failed",
+  "message": "參數驗證失敗: [數量至少為 1]",
+  "path": "/api/v1/campaigns/1/join"
+}
+```
 
 ## 1. Auth API
 
 ### 1.1 LINE 登入
 
-- 路徑: `/api/v1/auth/line`
+- Path: `/api/v1/auth/line`
 - Method: `POST`
+- Auth: 不需要
 - Content-Type: `application/json`
-- 說明: 以 LINE OAuth code 交換 access token，取得 LINE 使用者資料，建立或更新本地會員，最後回傳 JWT
-- 請求參數:
+
+請求：
 
 ```json
 {
   "code": "line-oauth-code",
-  "redirectUri": "https://example.com/callback"
+  "redirectUri": "http://localhost:5173/login/callback"
 }
 ```
 
-- 返回內容: `AuthResponse`
+回應：`AuthResponse`
 
 ```json
 {
   "token": "jwt-token",
-  "isNewUser": true,
+  "newUser": true,
   "user": {
     "id": 1,
     "displayName": "A Hui",
@@ -45,59 +87,102 @@
 }
 ```
 
-### 1.2 開發用快速登入
+### 1.2 開發用登入
 
-- 路徑: `/api/v1/auth/dev-login`
+- Path: `/api/v1/auth/dev-login`
 - Method: `GET`
-- Query:
-  - `userId` `Long`, optional, 預設 `1`
-- 說明: 直接為指定 `userId` 產生 JWT，方便本機或測試環境驗證流程
-- 返回內容:
+- Auth: 不需要
+
+Query 參數：
+
+- `userId` `Long`，optional，預設 `1`
+
+回應：
 
 ```json
 {
-  "message": "開發者快速登入成功",
+  "message": "開發用登入成功",
   "userId": "1",
   "token": "jwt-token"
 }
 ```
 
----
+## 2. Reference Data API
 
-## 2. Campaign API
+### 2.1 取得門市清單
 
-### 2.1 取得合購列表
-
-- 路徑: `/api/v1/campaigns`
+- Path: `/api/v1/stores`
 - Method: `GET`
-- Query:
-  - `storeId` `Integer`, optional
-  - `categoryId` `Integer`, optional
-  - `keyword` `String`, optional
-  - `page` `int`, optional, 預設 `0`
-  - `size` `int`, optional, 預設 `10`
-- 說明: 取得符合條件的合購列表，依建立時間新到舊排序
-- 返回內容: `Page<CampaignSummaryResponse>`
+- Auth: 不需要
+
+回應：`StoreResponse[]`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Costco 台中店",
+    "address": "台中市南屯區...",
+    "openTime": "10:00",
+    "closeTime": "21:30"
+  }
+]
+```
+
+### 2.2 取得分類清單
+
+- Path: `/api/v1/categories`
+- Method: `GET`
+- Auth: 不需要
+
+回應：`CategoryResponse[]`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "生鮮",
+    "icon": "🥬"
+  }
+]
+```
+
+## 3. Campaign API
+
+### 3.1 查詢活動清單
+
+- Path: `/api/v1/campaigns`
+- Method: `GET`
+- Auth: 不需要
+
+Query 參數：
+
+- `storeId` `Integer`，optional
+- `categoryId` `Integer`，optional
+- `keyword` `String`，optional
+- `page` `int`，optional，預設 `0`
+- `size` `int`，optional，預設 `10`
+
+回應：`Page<CampaignSummaryResponse>`
 
 ```json
 {
   "content": [
     {
       "id": 1,
-      "itemName": "鮭魚切片",
+      "itemName": "牛小排",
       "imageUrls": [
-        "http://localhost:8080/images/uuid-a.jpg",
-        "http://localhost:8080/images/uuid-b.jpg"
+        "http://localhost:8080/images/a.jpg"
       ],
       "pricePerUnit": 300,
-      "totalQuantity": 5,
-      "availableQuantity": 2,
-      "meetupLocation": "內湖店停車場",
-      "meetupTime": "2026-03-27T18:00:00",
-      "expireTime": "2026-03-27T16:00:00",
+      "totalQuantity": 20,
+      "availableQuantity": 8,
+      "meetupLocation": "台中店停車場",
+      "meetupTime": "2026-03-30T18:00:00",
+      "expireTime": "2026-03-30T16:00:00",
       "status": "OPEN",
       "scenarioType": "SCHEDULED",
-      "storeName": "內湖店",
+      "storeName": "Costco 台中店",
       "categoryName": "生鮮",
       "host": {
         "id": 10,
@@ -114,40 +199,102 @@
 }
 ```
 
-### 2.2 建立合購
+目前程式碼中會用到的活動狀態：
 
-- 路徑: `/api/v1/campaigns`
+- `OPEN`
+- `FULL`
+- `DELIVERED`
+- `COMPLETED`
+- `CANCELLED`
+- `HOST_NO_SHOW`
+
+`scenarioType` 目前請求端使用值：
+
+- `INSTANT`
+- `SCHEDULED`
+
+### 3.2 建立活動
+
+- Path: `/api/v1/campaigns`
 - Method: `POST`
+- Auth: 需要 JWT
 - Content-Type: `multipart/form-data`
-- 說明: 建立新的合購單，可上傳最多 3 張圖片
-- 請求參數:
-  - `storeId` `Integer`
-  - `categoryId` `Integer`
-  - `scenarioType` `String`
-  - `itemName` `String`
-  - `pricePerUnit` `Integer`
-  - `totalQuantity` `Integer`
-  - `meetupLocation` `String`
-  - `meetupTime` `LocalDateTime`
-  - `expireTime` `LocalDateTime`
-  - `images` `List<MultipartFile>`, optional, 最多 3 張
-- 返回內容:
+
+表單欄位：
+
+- `storeId` `Integer`
+- `categoryId` `Integer`
+- `scenarioType` `String`
+- `itemName` `String`
+- `pricePerUnit` `Integer`
+- `productTotalQuantity` `Integer`
+- `openQuantity` `Integer`
+- `meetupLocation` `String`
+- `meetupTime` `LocalDateTime`
+- `expireTime` `LocalDateTime`
+- `images` `List<MultipartFile>`，optional，最多 3 張
+
+說明：
+
+- 只有 `hasCostcoMembership = true` 的使用者可以開團
+- `openQuantity` 不能大於 `productTotalQuantity`
+- 實際活動的 `totalQuantity` 會寫入 `openQuantity`
+- 主揪自留數量會由 `productTotalQuantity - openQuantity` 計算
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "合購建立成功"
+  "message": "活動建立成功"
 }
 ```
 
-### 2.3 參加合購
+### 3.3 主揪調整活動數量
 
-- 路徑: `/api/v1/campaigns/{id}/join`
-- Method: `POST`
-- Path Variable:
-  - `id` `Long`: 合購 ID
+- Path: `/api/v1/campaigns/{id}/host-revise`
+- Method: `PUT`
+- Auth: 需要 JWT
 - Content-Type: `application/json`
-- 請求參數:
+
+請求：
+
+```json
+{
+  "newProductTotalQuantity": 36,
+  "newOpenQuantity": 20
+}
+```
+
+說明：
+
+- 只有主揪可操作
+- 只有 `OPEN` 狀態可調整
+- `newOpenQuantity` 不能大於 `newProductTotalQuantity`
+- `newOpenQuantity` 不能小於目前已售出數量
+- 更新後：
+  - `totalQuantity = newOpenQuantity`
+  - `hostReservedQuantity = newProductTotalQuantity - newOpenQuantity`
+  - `availableQuantity = newOpenQuantity - alreadySoldQuantity`
+- 若更新後 `availableQuantity = 0`，活動狀態會改為 `FULL`
+
+成功回應：
+
+```json
+{
+  "success": true,
+  "message": "活動數量調整成功"
+}
+```
+
+### 3.4 參加活動
+
+- Path: `/api/v1/campaigns/{id}/join`
+- Method: `POST`
+- Auth: 需要 JWT
+- Content-Type: `application/json`
+
+請求：
 
 ```json
 {
@@ -155,23 +302,30 @@
 }
 ```
 
-- 返回內容:
+說明：
+
+- `quantity` 必須 `>= 1`
+- 不能參加自己開的團
+- 只有 `OPEN` 狀態可參加
+- 過期後不可參加
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "成功參加合購"
+  "message": "成功參加活動"
 }
 ```
 
-### 2.4 修改參加數量
+### 3.5 修改參與數量
 
-- 路徑: `/api/v1/campaigns/{id}/revise`
+- Path: `/api/v1/campaigns/{id}/revise`
 - Method: `POST`
-- Path Variable:
-  - `id` `Long`: 合購 ID
+- Auth: 需要 JWT
 - Content-Type: `application/json`
-- 請求參數:
+
+請求：
 
 ```json
 {
@@ -179,249 +333,247 @@
 }
 ```
 
-- 說明:
-  - `quantity` 必須大於 `0`
-  - 修改後參與數量不得小於 `1`
-  - 若原本滿單且釋出名額，狀態會從 `FULL` 回到 `OPEN`
-- 返回內容:
+說明：
+
+- 這裡的 `quantity` 是「要減少的數量」，不是修改後的最終數量
+- 修改後個人參與數量必須仍然 `>= 1`
+- 活動狀態必須為 `OPEN` 或 `FULL`
+- 若活動原本為 `FULL`，修改後有名額會自動改回 `OPEN`
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "修改成功，已更新您的參與數量"
+  "message": "修改成功，已更新參與數量"
 }
 ```
 
-### 2.5 退出合購
+### 3.6 退出活動
 
-- 路徑: `/api/v1/campaigns/{id}/withdraw`
+- Path: `/api/v1/campaigns/{id}/withdraw`
 - Method: `POST`
-- Path Variable:
-  - `id` `Long`
-- 說明: 取消目前使用者在該合購中的參與，會釋出庫存並累加 `participantCancelCount`
-- 返回內容:
+- Auth: 需要 JWT
+
+說明：
+
+- 僅參與者可退出
+- 僅 `OPEN` 或 `FULL` 狀態可退出
+- 超過 `expireTime` 後不可退出
+- 退出後參與者狀態改為 `CANCELLED`
+- 使用者的 `participantCancelCount` 會加 1
+- 活動名額會歸還，必要時自動重開
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "退出成功，已釋出您的參與數量"
+  "message": "退出成功，活動名額已釋出"
 }
 ```
 
-### 2.6 團主標記已交付
+### 3.7 主揪標記已交付
 
-- 路徑: `/api/v1/campaigns/{id}/deliver`
+- Path: `/api/v1/campaigns/{id}/deliver`
 - Method: `POST`
-- Path Variable:
-  - `id` `Long`
-- 說明: 僅團主可操作，且該合購必須為 `OPEN` 或 `FULL`
-- 返回內容:
+- Auth: 需要 JWT
+
+說明：
+
+- 只有主揪可操作
+- 活動狀態必須為 `OPEN` 或 `FULL`
+- 至少要有一位 `JOINED` 參與者
+- 成功後活動狀態改為 `DELIVERED`
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "已標記為已交付，等待參與者確認"
+  "message": "已標記為已交付，等待參與者確認收貨"
 }
 ```
 
-### 2.7 參與者確認收貨
+### 3.8 參與者確認收貨
 
-- 路徑: `/api/v1/campaigns/{id}/confirm`
+- Path: `/api/v1/campaigns/{id}/confirm`
 - Method: `POST`
-- Path Variable:
-  - `id` `Long`
-- 說明: 參與者確認收貨後，自身狀態變成 `CONFIRMED`；若所有團員都確認，整張單轉為 `COMPLETED`
-- 返回內容:
+- Auth: 需要 JWT
+
+說明：
+
+- 活動狀態必須為 `DELIVERED`
+- 僅 `JOINED` 參與者可確認
+- 參與者確認後個人狀態改為 `CONFIRMED`
+- 當所有參與者都確認後，活動狀態改為 `COMPLETED`
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "已確認收貨"
+  "message": "確認收貨成功"
 }
 ```
 
-### 2.8 團主取消合購
+### 3.9 主揪取消活動
 
-- 路徑: `/api/v1/campaigns/{id}/cancel`
+- Path: `/api/v1/campaigns/{id}/cancel`
 - Method: `POST`
-- Path Variable:
-  - `id` `Long`
-- 說明: 僅團主可取消 `OPEN` 或 `FULL` 狀態的合購；若已有團員，會依狀態扣團主信用分，並批次改寫團員狀態
-- 返回內容:
+- Auth: 需要 JWT
+
+說明：
+
+- 只有主揪可操作
+- 活動狀態必須為 `OPEN` 或 `FULL`
+- 成功後活動狀態改為 `CANCELLED`
+- 若已有參與者：
+  - `FULL` 狀態取消會扣主揪信用分 `5`
+  - `OPEN` 狀態取消會扣主揪信用分 `2`
+  - 所有參與者會被批次取消
+
+成功回應：
 
 ```json
 {
   "success": true,
-  "message": "合購已取消，相關參與者已釋放"
+  "message": "活動已取消，參與者已收到釋出或取消結果"
 }
 ```
 
-### 2.9 查詢我的信用分紀錄
+### 3.10 查詢我的信用分紀錄
 
-- 路徑: `/api/v1/campaigns/me/credit-logs`
+- Path: `/api/v1/campaigns/me/credit-logs`
 - Method: `GET`
-- Query:
-  - `page` `int`, optional, 預設 `0`
-  - `size` `int`, optional, 預設 `10`
-- 返回內容: `Page<CreditLogResponse>`
+- Auth: 需要 JWT
+
+分頁參數：
+
+- `page` `int`，optional，預設 `0`
+- `size` `int`，optional，預設 `10`
+- `sort` `String`，optional
+
+回應：`Page<CreditLogResponse>`
 
 ```json
 {
   "content": [
     {
       "id": 1,
-      "scoreChange": -10,
-      "reason": "超過 24 小時未處理，系統判定放鳥",
-      "campaignId": 99,
-      "createdAt": "2026-03-27T10:00:00"
+      "scoreChange": -2,
+      "reason": "主揪取消活動(OPEN)",
+      "campaignId": 12,
+      "createdAt": "2026-03-30T12:00:00"
     }
-  ],
-  "totalPages": 1,
-  "totalElements": 1,
-  "size": 10,
-  "number": 0
+  ]
 }
 ```
 
-### 2.10 查詢我開的合購
+### 3.11 查詢我主揪的活動
 
-- 路徑: `/api/v1/campaigns/my-hosted`
+- Path: `/api/v1/campaigns/my-hosted`
 - Method: `GET`
-- Query:
-  - `page` `int`, optional, 預設 `0`
-  - `size` `int`, optional, 預設 `10`
-- 返回內容: `Page<CampaignSummaryResponse>`
+- Auth: 需要 JWT
 
-### 2.11 查詢我參加的合購
+分頁參數：
 
-- 路徑: `/api/v1/campaigns/my-joined`
+- `page` `int`，optional，預設 `0`
+- `size` `int`，optional，預設 `10`
+- `sort` `String`，optional
+
+回應：`Page<CampaignSummaryResponse>`
+
+### 3.12 查詢我參加的活動
+
+- Path: `/api/v1/campaigns/my-joined`
 - Method: `GET`
-- Query:
-  - `page` `int`, optional, 預設 `0`
-  - `size` `int`, optional, 預設 `10`
-- 返回內容: `Page<CampaignSummaryResponse>`
+- Auth: 需要 JWT
 
-### 2.12 取得聊天室歷史訊息
+分頁參數：
 
-- 路徑: `/api/v1/campaigns/{campaignId}/chat-messages`
+- `page` `int`，optional，預設 `0`
+- `size` `int`，optional，預設 `10`
+- `sort` `String`，optional
+
+回應：`Page<CampaignSummaryResponse>`
+
+### 3.13 查詢主揪活動儀表板
+
+- Path: `/api/v1/campaigns/{id}/host-dashboard`
 - Method: `GET`
-- Path Variable:
-  - `campaignId` `Long`
-- 說明:
-  - 僅團主或該團參與者可查看
-  - 依建立時間升冪回傳，舊訊息在前
-- 返回內容: `List<ChatMessageResponse>`
+- Auth: 需要 JWT
 
-```json
-[
-  {
-    "senderId": 2,
-    "senderName": "Howard",
-    "content": "我大概 7 點到",
-    "timestamp": "2026-03-29T18:30:15"
-  },
-  {
-    "senderId": 10,
-    "senderName": "Host A",
-    "content": "好，熟食區門口見",
-    "timestamp": "2026-03-29T18:31:08"
-  }
-]
-```
+說明：
 
----
+- 只有主揪可查看
+- 會回傳活動銷售摘要與所有參與者清單
 
-## 3. Reference Data API
-
-### 3.1 取得啟用中的賣場
-
-- 路徑: `/api/v1/stores`
-- Method: `GET`
-- 說明: 回傳所有 `isActive = true` 的賣場
-- 返回內容: `List<StoreResponse>`
-
-```json
-[
-  {
-    "id": 1,
-    "name": "內湖店",
-    "address": "台北市內湖區舊宗路一段 268 號",
-    "openTime": "10:00",
-    "closeTime": "21:30"
-  }
-]
-```
-
-### 3.2 取得分類清單
-
-- 路徑: `/api/v1/categories`
-- Method: `GET`
-- 說明: 依 `sortOrder` 升冪回傳分類
-- 返回內容: `List<CategoryResponse>`
-
-```json
-[
-  {
-    "id": 1,
-    "name": "生鮮",
-    "icon": "🥩"
-  }
-]
-```
-
----
-
-## 4. Review API
-
-### 4.1 建立評價
-
-- 路徑: `/api/v1/reviews`
-- Method: `POST`
-- Content-Type: `application/json`
-- 請求參數:
+回應：`HostDashboardResponse`
 
 ```json
 {
   "campaignId": 1,
-  "revieweeId": 2,
-  "rating": 5,
-  "comment": "交付準時，商品狀況良好"
+  "itemName": "牛小排",
+  "status": "OPEN",
+  "totalPhysicalQuantity": 36,
+  "openQuantity": 20,
+  "hostReservedQuantity": 16,
+  "alreadySoldQuantity": 12,
+  "availableQuantity": 8,
+  "participants": [
+    {
+      "userId": 101,
+      "displayName": "User A",
+      "quantity": 2,
+      "status": "JOINED"
+    }
+  ]
 }
 ```
 
-- 說明:
-  - 不可評自己
-  - `rating` 僅接受 `1` 到 `5`
-  - 同一組 `campaignId + reviewerId + revieweeId` 不可重複評價
-- 返回內容:
+### 3.14 查詢我在該活動的參與狀態
+
+- Path: `/api/v1/campaigns/{id}/participants/me`
+- Method: `GET`
+- Auth: 需要 JWT
+
+回應：`MyParticipationResponse`
 
 ```json
 {
-  "success": true,
-  "message": "評價成功，感謝您的回饋"
+  "host": false,
+  "joined": true,
+  "quantity": 2
 }
 ```
 
----
+說明：
 
-## 5. User API
+- 若自己是主揪，則 `host = true`
+- 若未參加，則 `joined = false`，`quantity = 0`
 
-### 5.1 更新我的個人資料
+## 4. User API
 
-- 路徑: `/api/v1/users/me`
+### 4.1 更新個人資料
+
+- Path: `/api/v1/users/me`
 - Method: `PUT`
+- Auth: 需要 JWT
 - Content-Type: `application/json`
-- 請求參數:
+
+請求：
 
 ```json
 {
-  "displayName": "新暱稱",
+  "displayName": "A Hui",
   "hasCostcoMembership": true
 }
 ```
 
-- 說明: 兩個欄位皆可單獨更新，未提供的欄位不變
-- 返回內容:
+欄位可部分更新，傳入 `null` 的欄位不會被修改。
+
+成功回應：
 
 ```json
 {
@@ -430,93 +582,176 @@
 }
 ```
 
----
+## 5. Review API
 
-## 6. WebSocket / STOMP
+### 5.1 新增評價
 
-這次工作區新增了聊天室與即時通知推播，通訊方式不是 REST，而是 STOMP over WebSocket。
+- Path: `/api/v1/reviews`
+- Method: `POST`
+- Auth: 需要 JWT
+- Content-Type: `application/json`
 
-### 6.1 建立 WebSocket 連線
-
-- 端點: `/ws`
-- 協定: WebSocket + SockJS fallback
-- 連線 Header:
-  - `Authorization: Bearer <JWT_TOKEN>`
-- 說明:
-  - 前端先連到 `/ws`
-  - 後端 `application destination prefix` 為 `/app`
-  - 群播 broker prefix 為 `/topic`
-  - 個人通知 broker prefix 為 `/user/queue`
-
-### 6.2 發送聊天室訊息
-
-- Send Destination: `/app/chat/{campaignId}/sendMessage`
-- 對應後端: `@MessageMapping("/chat/{campaignId}/sendMessage")`
-- 請求參數: `ChatMessageRequest`
+請求：
 
 ```json
 {
-  "content": "我五分鐘後到"
+  "campaignId": 1,
+  "revieweeId": 2,
+  "rating": 5,
+  "comment": "交易順利"
 }
 ```
 
-- 返回內容 / 廣播內容: `ChatMessageResponse`
-- Broadcast Topic: `/topic/campaigns/{campaignId}`
+說明：
+
+- 不可評價自己
+- `rating` 只能是 `1` 到 `5`
+- 同一 `campaignId + reviewerId + revieweeId` 只能評價一次
+- 信用分規則：
+  - `5` 星：`+1`
+  - `1` 星：`-3`
+  - 其他星等：`0`
+- 正向評價有 7 天去重限制：同一評價人對同一對象，7 天內再次給 `5` 星不會再加分
+
+成功回應：
 
 ```json
 {
-  "senderId": 2,
-  "senderName": "Howard",
-  "content": "我五分鐘後到",
-  "timestamp": "2026-03-29T18:45:20"
+  "success": true,
+  "message": "評價成功"
 }
 ```
 
-### 6.3 訂閱聊天室
+## 6. Notification API
 
-- Subscribe Topic: `/topic/campaigns/{campaignId}`
-- 說明: 成功送出訊息後，後端會把 `ChatMessageResponse` 廣播到該團聊天室頻道
+### 6.1 查詢未讀通知
 
-### 6.4 訂閱個人通知
+- Path: `/api/v1/notifications/unread`
+- Method: `GET`
+- Auth: 需要 JWT
 
-- Subscribe Topic: `/user/queue/notifications`
-- 說明:
-  - 當合購因認購而滿單時，`NotificationService` 會寫入 `notifications` 資料表
-  - 同時透過 `convertAndSendToUser` 推播給團主與所有團員
-- 廣播內容範例:
+回應：`NotificationResponse[]`
+
+```json
+[
+  {
+    "id": 1,
+    "type": "CAMPAIGN_FULL",
+    "referenceId": 99,
+    "content": "你的活動已滿團",
+    "createdAt": "2026-03-30T12:00:00"
+  }
+]
+```
+
+### 6.2 標記通知已讀
+
+- Path: `/api/v1/notifications/{id}/read`
+- Method: `PUT`
+- Auth: 需要 JWT
+
+成功回應：
 
 ```json
 {
-  "content": "您參與的合購單「鮭魚切片」已成團！請隨時留意聊天室訊息。",
+  "success": true,
+  "message": "已標記為已讀"
+}
+```
+
+## 7. Chat API
+
+### 7.1 查詢聊天室歷史訊息
+
+- Path: `/api/v1/campaigns/{campaignId}/chat-messages`
+- Method: `GET`
+- Auth: 需要 JWT
+
+說明：
+
+- 只有主揪或參與者可以查看
+
+回應：`ChatMessageResponse[]`
+
+```json
+[
+  {
+    "senderId": 1,
+    "senderName": "A Hui",
+    "content": "我大概六點到",
+    "timestamp": "2026-03-30T18:05:00"
+  }
+]
+```
+
+## 8. WebSocket / STOMP
+
+### 8.1 連線方式
+
+- Endpoint: `/ws`
+- 支援 SockJS
+- Client 傳送前綴：`/app`
+- 訂閱前綴：`/topic`
+- 使用者私有佇列前綴：`/user`
+
+連線時需在 STOMP `CONNECT` header 帶上：
+
+```http
+Authorization: Bearer <JWT_TOKEN>
+```
+
+後端會從 JWT 解析 `userId` 並寫入 WebSocket Session。
+
+### 8.2 傳送聊天室訊息
+
+- Client Send To: `/app/chat/{campaignId}/sendMessage`
+
+請求：
+
+```json
+{
+  "content": "大家幾點到？"
+}
+```
+
+說明：
+
+- 只有主揪或參與者可以發送
+
+廣播目的地：
+
+- Subscribe: `/topic/campaigns/{campaignId}`
+
+廣播內容：`ChatMessageResponse`
+
+```json
+{
+  "senderId": 1,
+  "senderName": "A Hui",
+  "content": "大家幾點到？",
+  "timestamp": "2026-03-30T18:10:00"
+}
+```
+
+### 8.3 使用者通知推播
+
+後端會使用使用者專屬佇列推播通知：
+
+- Subscribe: `/user/queue/notifications`
+
+推播內容範例：
+
+```json
+{
+  "content": "你的活動已滿團",
   "type": "CAMPAIGN_FULL",
-  "referenceId": 101
+  "referenceId": 99
 }
 ```
 
-### 6.5 驗證流程
+## 9. 目前未實作或不應寫入文件的介面
 
-- `WebSocketAuthInterceptor` 會在 STOMP `CONNECT` 時解析 JWT
-- `WebSocketConfig` 已將 interceptor 註冊到 inbound channel
-- 驗證成功後會把 `userId` 放進 WebSocket session，供聊天室發言時使用
+以下內容在目前 controller 中沒有對應 REST endpoint，不應再視為正式 API：
 
----
-
-## 7. 狀態補充
-
-### 7.1 Campaign 狀態
-
-- `OPEN`: 可參加
-- `FULL`: 已滿團
-- `DELIVERED`: 團主已交付，等待參與者確認
-- `COMPLETED`: 所有參與者已確認收貨
-- `CANCELLED`: 團主取消
-- `FAILED`: 已過期未成團
-- `HOST_NO_SHOW`: 團主超時未處理
-
-### 7.2 Participant 狀態
-
-- `JOINED`: 已參加
-- `CONFIRMED`: 已確認收貨
-- `CANCELLED`: 主動退出
-- `CANCELLED_BY_HOST`: 團主取消後由系統批次釋放
-- `CANCELLED_BY_SYSTEM`: 團主超時未處理後由系統批次釋放
+- `GET /api/v1/campaigns/{id}` 單筆活動詳情
+- 其他未在本文檔列出的 CRUD 介面
