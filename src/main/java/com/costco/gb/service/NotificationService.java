@@ -4,13 +4,14 @@ import com.costco.gb.dto.response.NotificationResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
-
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class NotificationService {
@@ -20,15 +21,35 @@ public class NotificationService {
 
     @Transactional
     public void notifyCampaignFull(Campaign campaign) {
-        // 1. 通知團主
-        sendNotification(campaign.getHost(), "CAMPAIGN_FULL", campaign.getId(),
-                "🎉 狂賀！您的合購單「" + campaign.getItemName() + "」已滿單，請準備安排面交！");
+        String itemName = campaign.getItemName();
+        Long campaignId = campaign.getId();
 
-        // 🌟 修正：只通知狀態是 JOINED 的團員！
-        List<Participant> participants = participantRepository.findByCampaignIdAndStatus(campaign.getId(), "JOINED");
+        // 1. 🔔 通知團主 (Host)
+        String hostContent = "🎉 狂賀！您的合購單「" + itemName + "」已滿單，請準備安排面交！";
+        sendNotification(campaign.getHost(), "CAMPAIGN_FULL", campaignId, hostContent);
+
+        // 2. 🔔 找出所有還在車上的團員 (JOINED)，逐一發送通知
+        List<Participant> participants = participantRepository.findByCampaignIdAndStatus(campaignId, "JOINED");
+        String participantContent = "✨ 報喜！您參與的合購單「" + itemName + "」已經達成目標數量囉！";
+
         for (Participant p : participants) {
-            // ... 發送推播 ...
+            sendNotification(p.getUser(), "CAMPAIGN_FULL", campaignId, participantContent);
         }
+
+        log.info("合購單 {} 滿單推播發送完畢，共計通知 {} 位團員與 1 位團主", campaignId, participants.size());
+    }
+
+    // 🌟 專屬：發送合購單被取消的通知給無辜團員
+    @Transactional
+    public void notifyCampaignCancelled(Campaign campaign, List<Participant> participants) {
+        String content = "😢 很抱歉，您參與的合購單「" + campaign.getItemName() + "」已被團主取消，系統已為您變更狀態。";
+
+        for (Participant p : participants) {
+            // 呼叫我們之前寫好的底層 private sendNotification 方法
+            // 發送到 CAMPAIGN_CANCELLED 類型
+            sendNotification(p.getUser(), "CAMPAIGN_CANCELLED", campaign.getId(), content);
+        }
+        log.info("已發送合購單取消通知給 {} 位團員", participants.size());
     }
 
     private void sendNotification(User user, String type, Long refId, String content) {

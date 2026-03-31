@@ -39,8 +39,9 @@ public class CampaignService {
     private final CategoryRepository categoryRepository;
     private final ParticipantRepository participantRepository;
     private final String UPLOAD_DIR = "uploads/campaigns/";
-    private final CreditScoreLogRepository creditScoreLogRepository; // 👈 加入這行
-    private final NotificationService notificationService; // 👈 加入這行
+    private final CreditScoreLogRepository creditScoreLogRepository;
+    private final NotificationService notificationService;
+
 
     // 🌟 注入 YML 裡的 base-url 參數
     @Value("${app.base-url}")
@@ -605,65 +606,58 @@ public class CampaignService {
     // ==========================================
     // 💣 團主專用：主動取消合購單 (包含階梯式懲罰機制)
     // ==========================================
+    // 🌟 團主主動取消合購單 (翻車/流局)
     @Transactional
-    public void cancelCampaignByHost(Long userId, Long campaignId) {
+    public void cancelCampaignByHost(Long hostId, Long campaignId) {
+
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
 
-        // 1. 身分核對：只有團主自己可以按
-        if (!campaign.getHost().getId().equals(userId)) {
-            throw new RuntimeException("權限不足：只有團主可以取消此合購單！");
+        // 🛡️ 防護 1：驗證身分
+        if (!campaign.getHost().getId().equals(hostId)) {
+            throw new RuntimeException("權限不足：您不是此合購單的團主！");
         }
 
-        // 2. 狀態核對：已經面交或結案的不能取消
-        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
-            throw new RuntimeException("合購單已進入交易階段或已結束，無法取消！");
+        // 🛡️ 防護 2：狀態防呆
+        if ("CANCELLED".equals(campaign.getStatus()) || "COMPLETED".equals(campaign.getStatus()) || "DELIVERED".equals(campaign.getStatus())) {
+            throw new RuntimeException("合購單當前狀態無法取消！");
         }
 
-        // 3. 結算懲罰：清點是不是已經有無辜團員上車了？
-        long joinedCount = participantRepository.countByCampaignIdAndStatus(campaignId, "JOINED");
+        // 🔍 清查車上的團員
+        List<Participant> activeParticipants = participantRepository.findByCampaignIdAndStatus(campaignId, "JOINED");
 
-        if (joinedCount > 0) {
-            User host = campaign.getHost();
-            int penalty = 0;
-            String penaltyReason = "";
+        if (!activeParticipants.isEmpty()) {
+            log.warn("團主 {} 取消了已有 {} 人上車的合購單 {}", hostId, activeParticipants.size(), campaignId);
 
-            // 💡 核心亮點：根據狀態決定懲罰力道
-            if ("FULL".equals(campaign.getStatus())) {
-                penalty = 5;
-                penaltyReason = "已成團 (FULL)";
-            } else if ("OPEN".equals(campaign.getStatus())) {
-                penalty = 2;
-                penaltyReason = "未成團 (OPEN)";
+            // 1. 標記戰犯與原因
+            campaign.setBlameUser(campaign.getHost());
+            campaign.setCancelReason("團主主動取消 (已有團員上車)");
+
+            // (假設你的 userService 有這支 API，未來可以補上扣分)
+            // userService.deductCreditScore(hostId, 10, "取消已有團員的合購單：「" + campaign.getItemName() + "」");
+
+            // 2. 將所有無辜團員「強制踢下車」
+            for (Participant p : activeParticipants) {
+                p.setStatus("CANCELLED");
             }
+            participantRepository.saveAll(activeParticipants);
 
-            // 執行扣分 (最低扣到 0 分)
-            int newScore = Math.max(0, host.getCreditScore() - penalty);
-            host.setCreditScore(newScore);
-            userRepository.save(host);
-            // 🌟 寫入信用存摺：主動取消
-            CreditScoreLog cslog = CreditScoreLog.builder()
-                    .user(host)
-                    .scoreChange(-penalty)
-                    .reason("團主主動取消" + penaltyReason + "的合購單")
-                    .campaignId(campaignId)
-                    .build();
-            creditScoreLogRepository.save(cslog);
+            // 🔔 3. 呼叫我們剛剛寫好的通知服務！(一秒推播給所有人)
+            notificationService.notifyCampaignCancelled(campaign, activeParticipants);
 
-            // 釋放所有被放鳥的團員 (呼叫 Repository 的批次更新)
-            int releasedCount = participantRepository.cancelAllByHost(campaignId);
-
-            log.info("團主 {} 主動取消了【{}】的合購單 {}，共有 {} 人受影響。扣除 {} 分，剩餘信用分 {}",
-                    userId, penaltyReason, campaignId, releasedCount, penalty, newScore);
         } else {
-            // 沒人上車，和平落幕，完全不扣分
-            log.info("團主 {} 取消了無人參與的合購單 {}", userId, campaignId);
+            campaign.setCancelReason("團主主動取消 (無人上車)");
         }
 
-        // 4. 最終將這張單設為取消狀態
+        // 💀 最終：將合購單本體標記為取消
         campaign.setStatus("CANCELLED");
+        campaign.setAvailableQuantity(campaign.getTotalQuantity());
+
         campaignRepository.save(campaign);
+        log.info("合購單 {} 已成功被團主 {} 取消。", campaignId, hostId);
     }
+
+
     @Transactional(readOnly = true)
     public MyParticipationResponse getMyParticipation(Long campaignId, Long userId) {
 

@@ -11,32 +11,41 @@ import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.stereotype.Component;
 
+import java.security.Principal;
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
-    private final JwtService jwtService; // 假設你有這個可以用來驗證 Token 的類別
+    private final JwtService jwtService;
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
-        // 當前端試圖建立連線時 (CONNECT)
         if (StompCommand.CONNECT.equals(accessor.getCommand())) {
-            // 從 Header 拿出 Authorization: Bearer <token>
             String authHeader = accessor.getFirstNativeHeader("Authorization");
             if (authHeader != null && authHeader.startsWith("Bearer ")) {
                 String token = authHeader.substring(7);
 
                 try {
-                    // 解析 Token 拿到 userId
+                    if (!jwtService.isTokenValid(token)) {
+                        throw new IllegalArgumentException("Token 已過期或不合法！");
+                    }
+
                     String userIdStr = jwtService.extractUserId(token);
                     Long userId = Long.parseLong(userIdStr);
 
-                    // 🌟 將驗證過的 userId 存入這次的 WebSocket Session 中！
+                    // 1. 存入口袋 (聊天室抓取歷史紀錄可能還是會用到)
                     accessor.getSessionAttributes().put("userId", userId);
-                    log.info("WebSocket 連線成功，使用者 ID: {}", userId);
+
+                    // 🌟 2. 終極修復：製作一張名牌 (Principal)，並掛在連線上！
+                    // 這樣 Spring 才知道這個連線的主人是誰，convertAndSendToUser 才能精準投遞！
+                    Principal userPrincipal = () -> userIdStr; // 這裡的名字必須是字串型態的 userId
+                    accessor.setUser(userPrincipal);
+
+                    log.info("WebSocket 連線成功，已綁定使用者 ID: {}", userId);
                 } catch (Exception e) {
                     log.error("WebSocket JWT 驗證失敗: {}", e.getMessage());
                     throw new IllegalArgumentException("無效的 Token，拒絕連線！");

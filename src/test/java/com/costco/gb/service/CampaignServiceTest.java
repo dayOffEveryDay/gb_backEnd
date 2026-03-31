@@ -58,7 +58,8 @@ class CampaignServiceTest {
         validRequest.setScenarioType("INSTANT");
         validRequest.setItemName("科克蘭鮮乳");
         validRequest.setPricePerUnit(135);
-        validRequest.setTotalQuantity(2);
+        validRequest.setProductTotalQuantity(2);
+        validRequest.setOpenQuantity(2);
         validRequest.setMeetupLocation("結帳區");
         validRequest.setMeetupTime(LocalDateTime.now().plusHours(2));
         validRequest.setExpireTime(LocalDateTime.now().plusHours(1));
