@@ -1,166 +1,127 @@
-# Costco Group Buying - 資料庫設計 (Database Schema) v2.0
+# DB_SCHEMA.md
 
-本專案採用關聯式資料庫 (MySQL / PostgreSQL)，共設計 12 張核心實體表。
-*備註：所有資料表皆具備 `created_at` 與 `updated_at` (DATETIME) 系統自動維護之審計欄位。*
+本文檔整理目前專案實際使用到的主要資料表與關鍵欄位，內容以 `entity` 與 `sql.sql` 為準。
 
-## 🏢 1. 基礎設定與實體店鋪 (Infrastructure)
+## 1. campaigns
 
-### 1.1 `stores` (門市與營業時間表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | INT | PK, Auto Inc. | | |
-| `name` | VARCHAR | | | 門市名稱 (例：中和店) |
-| `latitude` | DECIMAL(10,7) | | | 官方緯度 (供 LBS 搜尋) |
-| `longitude`| DECIMAL(10,7) | | | 官方經度 (供 LBS 搜尋) |
-| `address` | VARCHAR | | | 完整地址 |
-| `open_time` | TIME | | | 常態開店時間 (例：10:00:00) |
-| `close_time` | TIME | | | 常態閉店時間 (例：21:30:00) |
-| `is_active` | BOOLEAN | | TRUE | 是否營業中 |
+用途：團購主單。
 
-### 1.2 `categories` (商品分類表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | INT | PK, Auto Inc. | | |
-| `name` | VARCHAR | | | 分類名稱 (如：牛奶、生鮮) |
-| `icon` | VARCHAR | | | UI 顯示用圖示 (URL 或 Emoji) |
-| `sort_order` | INT | | 0 | 排序權重 |
+主要欄位：
 
----
+- `id` `BIGINT`：主鍵
+- `host_id` `BIGINT`：主揪使用者 ID
+- `category_id` `INT`：分類 ID
+- `store_id` `INT`：門市 ID
+- `scenario_type` `VARCHAR`：`INSTANT` / `SCHEDULED`
+- `item_name` `VARCHAR`
+- `image_urls` `VARCHAR`：多張圖片檔名以逗號串接
+- `price_per_unit` `INT`
+- `total_quantity` `INT`：對外開放認購總量
+- `available_quantity` `INT`：剩餘可認購數量
+- `host_reserved_quantity` `INT`：主揪保留數量
+- `meetup_location` `VARCHAR`
+- `meetup_time` `DATETIME`
+- `expire_time` `DATETIME`
+- `status` `VARCHAR`
+- `blame_user_id` `BIGINT`：取消或違約責任人
+- `cancel_reason` `VARCHAR`
+- `allow_revision` `BOOLEAN`：是否允許滿單後修改，預設 `false`
+- `created_at` `DATETIME`
+- `updated_at` `DATETIME`
 
-## 👤 2. 使用者與社交關聯 (Users & Social)
+目前程式中會用到的 `status`：
 
-### 2.1 `users` (使用者主表)
-處理 Line OAuth2 登入、權限與個人信用數據指標。
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | 系統唯一識別碼 |
-| `line_uid` | VARCHAR | UNIQUE, INDEX | | Line 授權回傳的 UID |
-| `display_name` | VARCHAR | | | 顯示暱稱 |
-| `profile_image_url`| VARCHAR | | | 頭像連結 |
-| `has_costco_membership`| BOOLEAN| | FALSE | 是否有好市多會員卡 (限制開團) |
-| `credit_score` | INT | | 100 | 綜合信用評分 |
-| `no_show_count` | INT | | 0 | 面交放鳥次數 |
-| `total_hosted_count`| INT | | 0 | 總發起成團數 |
-| `host_cancel_count` | INT | | 0 | 團主咎責取消次數 |
-| `total_joined_count`| INT | | 0 | 總參與成團數 |
-| `participant_cancel_count`|INT| | 0 | 團員咎責反悔次數 |
-| `status` | VARCHAR | | 'ACTIVE' | 帳號狀態 (ACTIVE, SUSPENDED) |
+- `OPEN`
+- `FULL`
+- `DELIVERED`
+- `COMPLETED`
+- `CANCELLED`
+- `HOST_NO_SHOW`
 
-### 2.2 `user_preferences` (用戶設定表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `user_id` | BIGINT | PK, FK (users.id) | | |
-| `receive_notifications`| BOOLEAN | | TRUE | 是否接收站內推播 |
-| `notification_mode` | VARCHAR | | 'ALL' | 通知層級 (ALL, PREF_ONLY, NONE) |
-| `favorite_store_ids`| JSON | | [] | 常用門市 ID 陣列 (例：[1, 3]) |
-| `preferred_category_ids`| JSON | | [] | 偏好的商品分類 ID 陣列 |
+`allow_revision` 行為：
 
-### 2.3 `user_follows` (關注表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `follower_id` | BIGINT | FK (users.id) | | 粉絲的 ID |
-| `host_id` | BIGINT | FK (users.id) | | 被關注的團主 ID |
-> ⚠️ **UNIQUE KEY (follower_id, host_id):** 防止重複追蹤。
+- 主揪呼叫 `/api/v1/campaigns/{id}/unlock` 後會設為 `true`
+- 團員在滿單狀態下，只有 `allow_revision = true` 才能修改數量或退出
+- 一旦名額釋出、活動回到 `OPEN`，會自動重設為 `false`
 
-### 2.4 `blocks` (黑名單表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `blocker_id` | BIGINT | FK (users.id) | | 執行拉黑者 |
-| `blocked_id` | BIGINT | FK (users.id) | | 被封鎖者 |
-> ⚠️ **UNIQUE KEY (blocker_id, blocked_id):** 防止重複拉黑。
+## 2. participants
 
----
+用途：活動參與者紀錄。
 
-## 🛒 3. 合購與認購核心 (Campaigns & Orders)
+主要欄位：
 
-### 3.1 `campaigns` (開團主表)
-| 欄位名稱                 | 型態 | 鍵值 / 約束 | 預設值 | 說明                                                                        |
-|:---------------------| :--- | :--- | :--- |:--------------------------------------------------------------------------|
-| `id`                 | BIGINT | PK, Auto Inc. | |                                                                           |
-| `host_id`            | BIGINT | FK (users.id), INDEX| | 開團者 ID                                                                    |
-| `category_id`        | INT | FK (categories.id) | | 商品分類 ID                                                                   |
-| `store_id`           | INT | FK (stores.id), INDEX | | 關聯門市 ID                                                                   |
-| `scenario_type`      | VARCHAR | | | 開團情境 (INSTANT, SCHEDULED)                                                 |
-| `item_name`          | VARCHAR | | | 商品名稱                                                                      |
-| `image_urls`         | VARCHAR | | | 現場商品圖片檔名(多張以逗號分隔)                                                                      |
-| `price_per_unit`     | INT | | | 預估單份金額                                                                    |
-| `total_quantity`     | INT | | | 總共分出數量                                                                    |
-| `available_quantity` | INT | | | 剩餘可認購數量 (與 Redis 同步)                                                      |
-| `meetup_location`    | VARCHAR | | | 預計面交地點                                                                    |
-| `meetup_time`        | DATETIME | | NULL | 預計面交時間                                                                    |
-| `expire_time`        | DATETIME | INDEX | NULL | 單據失效/流局時間                                                                 |
-| `status`             | VARCHAR | INDEX | 'OPEN' | 狀態 (OPEN, FULL, COMPLETED, CANCEL_PENDING, CANCELLED, EXPIRED, DELIVERED) |
-| `blame_user_id`      | BIGINT | FK (users.id) | NULL | 若取消，歸咎於哪位會員 (記點用)                                                         |
-| `cancel_reason`      | VARCHAR | | NULL | 取消原因說明                                                                    |
+- `id` `BIGINT`
+- `campaign_id` `BIGINT`
+- `user_id` `BIGINT`
+- `quantity` `INT`
+- `status` `VARCHAR`
 
-### 3.2 `participants` (認購明細表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `campaign_id` | BIGINT | FK (campaigns.id) | | 所屬合購單 |
-| `user_id` | BIGINT | FK (users.id) | | 參與者 |
-| `quantity` | INT | | | 認購數量 |
-| `status` | VARCHAR | | 'JOINED' | 狀態 (JOINED, CONFIRMED, CANCELLED, CANCELLED_BY_HOST, CANCELLED_BY_SYSTEM) |
-> ⚠️ **UNIQUE KEY (campaign_id, user_id):** 防止同一個人在同一單產生兩筆明細 (防連點)。
+目前程式中實際使用的狀態至少包含：
 
----
+- `JOINED`
+- `CONFIRMED`
+- `CANCELLED`
 
-## 💬 4. 互動、通訊與評價 (Interactions & Logs)
+## 3. notifications
 
-### 4.1 `chat_messages` (聊天紀錄表)
-> ⚠️ 本次工作區新增聊天室實作，聊天紀錄由 `ChatService` 寫入，預留排程於 3 個月後自動刪除。
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `campaign_id` | BIGINT | FK (campaigns.id), INDEX| | 所屬聊天室 (等同團單 ID) |
-| `sender_id` | BIGINT | FK (users.id) | | 發送者 |
-| `message_type` | VARCHAR | | 'TEXT' | 訊息類型 (TEXT, IMAGE, SYSTEM) |
-| `content` | TEXT | | | 訊息內容 |
+用途：站內通知與 WebSocket 推播紀錄。
 
-### 4.2 `reviews` (評價表)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `campaign_id` | BIGINT | FK (campaigns.id) | | 發生交易的團單 |
-| `reviewer_id` | BIGINT | FK (users.id) | | 評價者 |
-| `reviewee_id` | BIGINT | FK (users.id) | | 被評價者 |
-| `rating` | INT | CHECK (1-5) | | 星等 (1-5) |
-| `comment` | VARCHAR | | | 文字評論 |
-| `is_score_counted` | BOOLEAN | | FALSE | 是否已產生信用加分 (防刷單機制) |
-> ⚠️ **UNIQUE KEY (campaign_id, reviewer_id, reviewee_id):** 確保一單只能互評一次 (防洗評價)。
+主要欄位：
 
-### 4.3 `notifications` (站內通知表)
-> ⚠️ 本次工作區新增滿單即時通知實作，資料先寫 DB，再用 WebSocket 推播到 `/user/queue/notifications`。過期後 7 天可由排程刪除。
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `user_id` | BIGINT | FK (users.id), INDEX| | 接收通知的會員 |
-| `type` | VARCHAR | | | 通知類型 (NEW_CAMPAIGN, CAMPAIGN_FULL 等) |
-| `reference_id` | BIGINT | | | 關聯的 Entity ID (如 campaign_id) |
-| `content` | VARCHAR | | | 推播文字內容 |
-| `is_read` | BOOLEAN | | FALSE | 是否已讀 |
-| `expire_time` | DATETIME | INDEX | NULL | 跟隨關聯團單的過期時間 |
+- `id` `BIGINT`
+- `user_id` `BIGINT`
+- `type` `VARCHAR`
+- `reference_id` `BIGINT`
+- `content` `VARCHAR`
+- `is_read` `BOOLEAN`
+- `created_at` `DATETIME`
 
-### 4.4 `credit_score_logs` (信用分數變動紀錄表 - 信用存摺)
-| 欄位名稱 | 型態 | 鍵值 / 約束 | 預設值 | 說明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `id` | BIGINT | PK, Auto Inc. | | |
-| `user_id` | BIGINT | FK (users.id), INDEX | | 被異動分數的會員 |
-| `score_change` | INT | | | 異動分數 (+5, -10 等) |
-| `reason` | VARCHAR | | | 異動原因 (例：團主主動取消已成團合購單) |
-| `campaign_id` | BIGINT | FK (campaigns.id), NULL | NULL | 關聯的合購單 ID (可選，方便追溯) |
-> ⚠️ **INDEX (user_id, created_at):** 加速前端查詢歷史明細。
+目前程式中已使用的通知型別：
 
----
+- `CAMPAIGN_FULL`
+- `CAMPAIGN_CANCELLED`
+- `MEMBER_WITHDRAW`
+- `KICKED`
 
-## 補充說明
+通知除了寫入資料庫，也會透過 WebSocket 推送到：
 
-- 目前程式碼已新增 `ChatMessage`、`Notification` 對應 entity / repository / service。
-- 聊天室資料流:
-  - WebSocket 收到訊息後寫入 `chat_messages`
-  - REST `GET /api/v1/campaigns/{campaignId}/chat-messages` 讀取歷史訊息
-- 通知資料流:
-  - 合購滿單時建立 `notifications`
-  - 同時透過 `convertAndSendToUser` 即時推播給團主與團員
+- `/user/queue/notifications`
+
+## 4. credit_score_logs
+
+用途：信用分異動紀錄。
+
+主要欄位：
+
+- `id` `BIGINT`
+- `user_id` `BIGINT`
+- `score_change` `INT`
+- `reason` `VARCHAR`
+- `campaign_id` `BIGINT`
+- `created_at` `DATETIME`
+
+## 5. chat_messages
+
+用途：聊天室訊息歷史紀錄。
+
+主要欄位：
+
+- `id` `BIGINT`
+- `campaign_id` `BIGINT`
+- `sender_id` `BIGINT`
+- `message_type` `VARCHAR`
+- `content` `TEXT`
+- `created_at` `DATETIME`
+
+## 6. users
+
+用途：使用者主檔。
+
+與本次文件更新較相關的欄位：
+
+- `id`
+- `display_name`
+- `profile_image_url`
+- `has_costco_membership`
+- `credit_score`
+- `participant_cancel_count`
