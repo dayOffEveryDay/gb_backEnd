@@ -173,6 +173,7 @@ CREATE TABLE `campaigns` (
   `cancel_reason` varchar(255) DEFAULT NULL COMMENT '取消原因說明',
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `allow_revision` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否允許滿單後修改',
   PRIMARY KEY (`id`),
   KEY `host_id` (`host_id`),
   KEY `category_id` (`category_id`),
@@ -182,7 +183,7 @@ CREATE TABLE `campaigns` (
   CONSTRAINT `campaigns_ibfk_2` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`),
   CONSTRAINT `campaigns_ibfk_3` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`),
   CONSTRAINT `campaigns_ibfk_4` FOREIGN KEY (`blame_user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ;
 
 CREATE TABLE participants (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

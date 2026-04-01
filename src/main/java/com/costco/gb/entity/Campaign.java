@@ -60,4 +60,8 @@ public class Campaign extends BaseEntity {
     private User blameUser;
 
     private String cancelReason;
+
+    @Builder.Default
+    @Column(name = "allow_revision", nullable = false)
+    private boolean allowRevision = false;
 }

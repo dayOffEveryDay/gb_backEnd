@@ -402,6 +402,62 @@ public class CampaignService {
         }
     }
 
+    // 🌟 團主專用：踢除裝死或惡意團員
+    @Transactional
+    public void kickParticipant(Long hostId, Long campaignId, Long targetUserId) {
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        if (!campaign.getHost().getId().equals(hostId)) {
+            throw new RuntimeException("只有團主可以踢人！");
+        }
+
+        Participant participant = participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, targetUserId, "JOINED")
+                .orElseThrow(() -> new RuntimeException("找不到該名參團中的團員"));
+
+        // 1. 強制改變狀態為已取消
+        participant.setStatus("CANCELLED");
+        participantRepository.save(participant);
+
+        // 2. 釋放他佔用的數量
+        int freedQuantity = participant.getQuantity();
+        campaign.setAvailableQuantity(campaign.getAvailableQuantity() + freedQuantity);
+
+        // 3. 既然有空位了，狀態自動退回 OPEN，並把解鎖開關關掉 (因為 OPEN 本來就可以自由修改)
+        campaign.setStatus("OPEN");
+        campaign.setAllowRevision(false);
+        campaignRepository.save(campaign);
+
+        // 4. 🔔 通知被踢的人與聊天室
+        notificationService.sendNotification(participant.getUser(), "KICKED", campaignId,
+                "您已被團主移出合購單「" + campaign.getItemName() + "」。");
+
+        log.info("團主 {} 踢除了團員 {}，釋出 {} 份，合購單 {} 退回 OPEN 狀態", hostId, targetUserId, freedQuantity, campaignId);
+    }
+
+    // 🌟 團主專用：滿單後開放團員修改數量/退出
+    @Transactional
+    public void unlockRevision(Long hostId, Long campaignId) {
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        if (!campaign.getHost().getId().equals(hostId)) {
+            throw new RuntimeException("權限不足！");
+        }
+
+        if (!"FULL".equals(campaign.getStatus())) {
+            throw new RuntimeException("只有在滿單狀態才需要特別解鎖修改權限！");
+        }
+
+        // 打開開關
+        campaign.setAllowRevision(true);
+        campaignRepository.save(campaign);
+
+        // 🔔 (可選) 推播通知所有人：團主已開放修改權限！
+        log.info("合購單 {} 已由團主解鎖修改權限", campaignId);
+    }
+
+
     @Transactional
     public void reviseCampaign(Long userId, Long campaignId, ReviseCampaignRequest request) {
 
@@ -413,17 +469,16 @@ public class CampaignService {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
 
-        // 只有在 OPEN (招募中) 或 FULL (已滿單) 的狀態下可以反悔減少數量。
-        // 如果已經面交或結案，就不能改了！
-        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
-            throw new RuntimeException("此合購單已進入處理階段或已結束，無法修改數量！");
+        // 🛡️ 防護鎖：只有在 OPEN 或「被團主解鎖」的 FULL 狀態下可以改
+        if (!"OPEN".equals(campaign.getStatus()) && !campaign.isAllowRevision()) {
+            throw new RuntimeException("合購單已滿單鎖定，如需修改請在聊天室請團主開放修改權限！");
         }
 
-        // 2. 找出這個人的參團紀錄
-        Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, userId)
-                .orElseThrow(() -> new RuntimeException("您尚未加入此合購單！"));
+        // 2. 🌟 修正：必須確保他現在還在車上 (JOINED)！
+        Participant participant = participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, userId, "JOINED")
+                .orElseThrow(() -> new RuntimeException("您尚未加入此合購單，或已經退出！"));
 
-        // 3. 🛡️ 核心規則：減少後的數量不能低於 1
+        // 3. 核心規則：減少後的數量不能低於 1
         int newQuantity = participant.getQuantity() - request.getQuantity();
         if (newQuantity < 1) {
             throw new RuntimeException("減少後的數量不能低於 1！如果您想完全退出，請使用取消參團功能。");
@@ -433,39 +488,37 @@ public class CampaignService {
         participant.setQuantity(newQuantity);
         participantRepository.save(participant);
 
-        // 5. 歸還庫存 (打向資料庫的原子操作)
+        // 5. 歸還庫存
         campaignRepository.incrementQuantity(campaignId, request.getQuantity());
 
-        // 🌟 手動同步記憶體狀態 (避免 Hibernate 髒檢查把舊數字寫回去)
+        // 🌟 手動同步記憶體狀態
         int currentAvailable = campaign.getAvailableQuantity() + request.getQuantity();
         campaign.setAvailableQuantity(currentAvailable);
 
-        // 6. ✨ 狀態回朔魔法：如果原本滿單了，現在釋出名額，要自動變回招募中！
-        if ("FULL".equals(campaign.getStatus()) && currentAvailable > 0) {
+        // 6. 狀態回朔魔法
+        if (currentAvailable > 0) {
             campaign.setStatus("OPEN");
-            log.info("合購單 {} 因團員減少認購數量，釋出名額，從 FULL 恢復為 OPEN 狀態！", campaignId);
+            campaign.setAllowRevision(false); // 🌟 記得把鎖扣回去！回到一般招募狀態
+            log.info("合購單 {} 釋出名額，恢復為 OPEN 狀態，並關閉特權修改鎖！", campaignId);
         }
 
         log.info("User {} 在合購單 {} 減少了數量: {}，目前總共認購: {}",
                 userId, campaignId, request.getQuantity(), newQuantity);
     }
+
     @Transactional
     public void withdrawCampaign(Long userId, Long campaignId) {
 
-        // 1. 檢查該會員是否真的有加入這團
-        Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, userId)
-                .orElseThrow(() -> new RuntimeException("您並未參加此合購單！"));
+        // 1. 🌟 修正：直接用 AndStatus 精準抓出還在車上的人，取代原本的 if 判斷，程式碼更簡潔
+        Participant participant = participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, userId, "JOINED")
+                .orElseThrow(() -> new RuntimeException("您並未參加此合購單，或已經退出過了！"));
 
-        // 如果他早就退出過了，防呆擋下
-        if (!"JOINED".equals(participant.getStatus())) {
-            throw new RuntimeException("您已經退出過了，無法重複操作！");
-        }
-
-        // 2. 檢查合購單狀態 (如果已經完成交易，或是流局取消，就不能退出了)
+        // 2. 檢查合購單狀態
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
 
-        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
+        // 🛡️ 防護鎖
+        if (!"OPEN".equals(campaign.getStatus()) && !campaign.isAllowRevision()) {
             throw new RuntimeException("此合購單已進入交易階段或已結束，無法退出！請直接聯繫團主。");
         }
         if (LocalDateTime.now().isAfter(campaign.getExpireTime())) {
@@ -476,24 +529,29 @@ public class CampaignService {
         participant.setStatus("CANCELLED");
         participantRepository.save(participant);
 
-        // 4. 🛡️ 原子性加回庫存，並將狀態強制切回 OPEN
-        int updatedRows = campaignRepository.incrementQuantityAndReopen(campaignId, participant.getQuantity());
-        if (updatedRows == 0) {
-            throw new RuntimeException("退出失敗，合購單狀態可能發生異常！");
-        }
+        // 4. 原子性加回庫存
+        // 🌟 注意：如果你的 incrementQuantityAndReopen 裡面是用 SQL 寫死的，
+        // 記得去 Repository 裡面把 SQL 改成 `allow_revision = false` 喔！
+        // 如果不想改 SQL，可以在這裡手動用 Hibernate 儲存：
+        campaign.setAvailableQuantity(campaign.getAvailableQuantity() + participant.getQuantity());
+        campaign.setStatus("OPEN");
+        campaign.setAllowRevision(false); // 🌟 把鎖扣回去！
+        campaignRepository.save(campaign);
 
-        // 5. ⚠️ 信用記點：增加該使用者的「反悔次數」
+        // 5. 信用記點：增加反悔次數 (這招超棒！)
         User user = userRepository.findById(userId).orElseThrow();
         user.setParticipantCancelCount(user.getParticipantCancelCount() + 1);
-        // (TODO V2 進階：如果反悔次數過高，可以在這裡順便扣他的 creditScore 信用分數)
         userRepository.save(user);
 
-        // 6. 紀錄 MDC TraceId 追蹤日誌
         log.info("User {} 成功退出了合購單 {}，釋放數量: {}，累積反悔次數: {}",
                 userId, campaignId, participant.getQuantity(), user.getParticipantCancelCount());
 
-        // TODO: 未來可在這裡觸發推播 (Notification)，通知團主有人跳車了
+        // 🌟  發送通知給團主
+         notificationService.sendNotification(campaign.getHost(), "MEMBER_WITHDRAW", campaignId,
+            "😢 團員已退出您的合購單「" + campaign.getItemName() + "」，目前已恢復招募狀態。");
+
     }
+
     // ==========================================
     // 🚚 團主專用：宣告已面交 (轉為 DELIVERED)
     // ==========================================

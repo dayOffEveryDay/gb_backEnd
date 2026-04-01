@@ -121,6 +121,42 @@ public class CampaignController {
         ));
     }
 
+    // 🌟 團主專用：滿單後開放團員修改數量/退出
+    @PostMapping("/{id}/unlock")
+    public ResponseEntity<?> unlockRevision(@PathVariable("id") Long campaignId) {
+
+        // ✨ 一樣從 Token 抓取當前登入者 (團主) ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long hostId = Long.parseLong(userIdStr);
+
+        // 呼叫 Service 執行解鎖邏輯
+        campaignService.unlockRevision(hostId, campaignId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "已開放修改權限，團員現在可以自行調整數量或退出了。"
+        ));
+    }
+
+    // 🌟 團主專用：踢除裝死或惡意團員
+    @PostMapping("/{id}/participants/{participantId}/kick")
+    public ResponseEntity<?> kickParticipant(
+            @PathVariable("id") Long campaignId,
+            @PathVariable("participantId") Long targetUserId) {
+
+        // ✨ 統一用 Spring Security Context 抓取當前登入者 (團主) ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long hostId = Long.parseLong(userIdStr);
+
+        // 呼叫 Service 執行踢除邏輯
+        campaignService.kickParticipant(hostId, campaignId, targetUserId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "已成功踢除該名團員，並將合購單退回招募狀態。"
+        ));
+    }
+
     // 團主宣告已面交
     @PostMapping("/{id}/deliver")
     public ResponseEntity<?> deliverCampaign(@PathVariable("id") Long campaignId) {

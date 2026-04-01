@@ -52,7 +52,7 @@ public class NotificationService {
         log.info("已發送合購單取消通知給 {} 位團員", participants.size());
     }
 
-    private void sendNotification(User user, String type, Long refId, String content) {
+    public void sendNotification(User user, String type, Long refId, String content) {
         // 存入資料庫
         Notification notification = Notification.builder()
                 .user(user)
