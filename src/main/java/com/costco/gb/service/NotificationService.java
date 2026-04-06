@@ -104,4 +104,24 @@ public class NotificationService {
         notification.setIsRead(true);
         notificationRepository.save(notification);
     }
+
+    // 🌟 專屬：警告團員被標記棄單，提醒他可以申訴！
+    @Transactional
+    public void notifyUserNoShowWarning(User targetUser, Campaign campaign) {
+        String content = "🚨 警告：團主已將您在「" + campaign.getItemName() + "」的狀態標記為「未現身/棄單」。若有異議，請盡速前往該合購單提出仲裁！";
+
+        // 呼叫底層推播方法
+        sendNotification(targetUser, "NO_SHOW_WARNING", campaign.getId(), content);
+        log.info("已發送棄單警告通知給團員 {}", targetUser.getId());
+    }
+
+    // 🌟 專屬：通知團主有人提出仲裁，合購單凍結！
+    @Transactional
+    public void notifyHostAboutDispute(Campaign campaign) {
+        String content = "⚖️ 仲裁通知：您的合購單「" + campaign.getItemName() + "」有團員提出異議。訂單已進入凍結狀態，請盡速前往聊天室進行協商或上傳相關證據。";
+
+        // 直接從 campaign 抓出 Host 來通知
+        sendNotification(campaign.getHost(), "DISPUTE_RAISED", campaign.getId(), content);
+        log.info("已發送仲裁通知給團主 {}", campaign.getHost().getId());
+    }
 }

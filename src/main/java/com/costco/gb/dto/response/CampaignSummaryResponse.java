@@ -26,7 +26,9 @@ public class CampaignSummaryResponse {
 
     // 團主資訊 (前端需要顯示頭像和信用評分)
     private HostSummary host;
-
+    // 🌟 新增：當前登入者在這張單裡的專屬狀態 (JOINED, NO_SHOW, DISPUTED, COMPLETED 等)
+    // 如果是訪客在大廳看，這個欄位就會是 null
+    private String myParticipantStatus;
     @Data
     @Builder
     public static class HostSummary {

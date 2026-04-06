@@ -25,4 +25,10 @@ public class Participant extends BaseEntity {
     @Builder.Default
     @Column(length = 50)
     private String status = "JOINED";
+
+    @Column(name = "dispute_reason", length = 500)
+    private String disputeReason; // 🌟 新增：存放爭議/投訴原因
+    // 🌟 團主的矛：團主標記棄單時的備註 (例如："打電話都不接")
+    @Column(name = "host_note", length = 255)
+    private String hostNote;
 }

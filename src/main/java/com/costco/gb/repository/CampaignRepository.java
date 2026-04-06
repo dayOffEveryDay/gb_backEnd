@@ -26,23 +26,31 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     // 團主個人頁面：查詢某位團主發起的所有合購單 (依建立時間倒序)
     Page<Campaign> findByHostIdOrderByCreatedAtDesc(Long hostId, Pageable pageable);
 
-    // 🌟 修正版：撈取「我跟的團」，必須確保 Participant 的狀態是 JOINED！
+    // 包含：進行中(JOINED)、已完成(COMPLETED)、爭議中(DISPUTED)、被標放鳥(NO_SHOW)
+    // 刻意排除：自己跳車(CANCELLED)、被踢除(KICKED)
     @Query("SELECT c FROM Campaign c JOIN Participant p ON c.id = p.campaign.id " +
-            "WHERE p.user.id = :userId AND p.status = 'JOINED' " +
+            "WHERE p.user.id = :userId AND p.status IN ('JOINED', 'COMPLETED', 'DISPUTED', 'NO_SHOW','CONFIRMED') " +
             "ORDER BY c.createdAt DESC")
     Page<Campaign> findJoinedCampaignsByUserId(@Param("userId") Long userId, Pageable pageable);
 
-    // 支援動態條件的超強大查詢 (如果參數傳 null，該條件就會自動被忽略)
+    // 🌟 終極防護版大廳查詢：支援動態條件 + 雙向黑名單隱藏！
     @Query("SELECT c FROM Campaign c WHERE " +
             "(:storeId IS NULL OR c.store.id = :storeId) AND " +
             "(:categoryId IS NULL OR c.category.id = :categoryId) AND " +
             "(:keyword IS NULL OR c.itemName LIKE %:keyword%) AND " +
-            "c.status IN ('OPEN', 'FULL')") // 首頁通常只顯示還在進行中的單
+            "c.status IN ('OPEN', 'FULL') AND " +
+            // 🛡️ 黑名單雙向過濾：如果 userId 存在，就執行過濾
+            "(:userId IS NULL OR (" +
+            "  NOT EXISTS (SELECT b FROM Block b WHERE b.blocker.id = :userId AND b.blocked.id = c.host.id) AND " +
+            "  NOT EXISTS (SELECT b FROM Block b WHERE b.blocker.id = c.host.id AND b.blocked.id = :userId)" +
+            "))")
     Page<Campaign> findCampaignsWithFilters(
             @Param("storeId") Integer storeId,
             @Param("categoryId") Integer categoryId,
             @Param("keyword") String keyword,
+            @Param("userId") Long userId, // ✨ 新增這行：傳入當前登入者 ID
             Pageable pageable);
+
 
     @Modifying
     @Query("UPDATE Campaign c SET c.availableQuantity = c.availableQuantity - :quantity " +
@@ -86,5 +94,23 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             "AND c.imageUrls IS NOT NULL AND c.imageUrls NOT LIKE '%_thumb%'")
     List<Campaign> findOldCampaignsForImageCompression(@Param("timeLimit") LocalDateTime timeLimit);
 
+    // 🌟 升級版大廳查詢：加入雙向黑名單過濾！
+    // 條件 1：合購單狀態要是 OPEN
+    // 條件 2：我不可以看到「我拉黑的人」開的團 (blocker = 我, blocked = 團主)
+    // 條件 3：我不可以看到「拉黑我的人」開的團 (blocker = 團主, blocked = 我)
+    @Query("SELECT c FROM Campaign c " +
+            "WHERE c.status = 'OPEN' " +
+            "AND NOT EXISTS (SELECT b FROM Block b WHERE b.blocker.id = :userId AND b.blocked.id = c.host.id) " +
+            "AND NOT EXISTS (SELECT b FROM Block b WHERE b.blocker.id = c.host.id AND b.blocked.id = :userId) " +
+            "ORDER BY c.createdAt DESC")
+    Page<Campaign> findAvailableCampaignsWithFilter(@Param("userId") Long userId, Pageable pageable);
+
+
+    // 🌟 專屬個人頁面用：撈取某位團主「正在進行中」的合購單
+    @Query("SELECT c FROM Campaign c WHERE c.host.id = :hostId AND c.status IN ('OPEN') ORDER BY c.createdAt DESC")
+    List<Campaign> findActiveCampaignsByHostId(@Param("hostId") Long hostId);
+
+    // 🌟 計算該使用者作為「團主」成功結案的數量
+    int countByHostIdAndStatus(Long hostId, String status);
 
 }

@@ -24,6 +24,7 @@ public class HostDashboardResponse {
     @Data
     @Builder
     public static class ParticipantDetail {
+        private Long participantsId;
         private Long userId;
         private String displayName; // 團員暱稱
         private Integer quantity;// 認購數量

@@ -48,4 +48,9 @@ public interface ParticipantRepository extends JpaRepository<Participant, Long> 
     @Modifying
     @Query("DELETE FROM Participant p WHERE p.campaign.id = :campaignId")
     int deleteByCampaignId(@Param("campaignId") Long campaignId);
+
+    // 🌟 計算該使用者作為「團員」成功結案的數量
+    int countByUserIdAndStatus(Long userId, String status);
+
+
 }

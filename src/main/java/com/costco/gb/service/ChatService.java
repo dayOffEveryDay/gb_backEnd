@@ -46,6 +46,7 @@ public class ChatService {
                 .senderId(sender.getId())
                 .senderName(sender.getDisplayName() != null ? sender.getDisplayName() : "匿名會員")
                 .content(message.getContent())
+                .avatarUrl(sender.getProfileImageUrl())
                 .timestamp(message.getCreatedAt())
                 .build();
     }
@@ -74,6 +75,7 @@ public class ChatService {
                 .map(msg -> ChatMessageResponse.builder()
                         .senderId(msg.getSender().getId())
                         .senderName(msg.getSender().getDisplayName() != null ? msg.getSender().getDisplayName() : "匿名會員")
+                        .avatarUrl(msg.getSender().getProfileImageUrl())
                         .content(msg.getContent())
                         .timestamp(msg.getCreatedAt())
                         .build())

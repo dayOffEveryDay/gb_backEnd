@@ -27,15 +27,31 @@ public class CampaignController {
 
     private final CampaignService campaignService;
     private final UserService userService;
+
     @GetMapping
     public ResponseEntity<Page<CampaignSummaryResponse>> getCampaigns(
             @RequestParam(required = false) Integer storeId,
-            @RequestParam(required = false) Integer categoryId, // 新增分類
-            @RequestParam(required = false) String keyword,     // 新增關鍵字
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(required = false) String keyword,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
 
-        Page<CampaignSummaryResponse> response = campaignService.getActiveCampaigns(storeId, categoryId, keyword, page, size);
+        // ✨ 安全解析當前登入者 ID (支援訪客模式)
+        Long currentUserId = null;
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        // 確保有登入，且 Principal 是字串 (我們之前存的 userIdStr)，且不是 "anonymousUser"
+        if (authentication != null && authentication.isAuthenticated() &&
+                authentication.getPrincipal() instanceof String &&
+                !"anonymousUser".equals(authentication.getPrincipal())) {
+
+            currentUserId = Long.parseLong((String) authentication.getPrincipal());
+        }
+
+        // 把 currentUserId 傳給 Service
+        Page<CampaignSummaryResponse> response = campaignService.getActiveCampaigns(
+                storeId, categoryId, keyword, currentUserId, page, size);
+
         return ResponseEntity.ok(response);
     }
 
@@ -95,8 +111,10 @@ public class CampaignController {
     @PostMapping("/{id}/revise")
     public ResponseEntity<?> reviseCampaign(
             @PathVariable("id") Long campaignId,
-            @RequestBody ReviseCampaignRequest request,
-            @RequestAttribute("userId") Long userId) {
+            @RequestBody ReviseCampaignRequest request) {
+        // 從 Token 攔截器中拿出當前使用者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = Long.parseLong(userIdStr);
 
         campaignService.reviseCampaign(userId, campaignId, request);
 
@@ -142,14 +160,17 @@ public class CampaignController {
     @PostMapping("/{id}/participants/{participantId}/kick")
     public ResponseEntity<?> kickParticipant(
             @PathVariable("id") Long campaignId,
-            @PathVariable("participantId") Long targetUserId) {
+            @PathVariable("participantId") Long targetUserId,
+            @RequestBody(required = false) Map<String, String> requestBody) {
 
         // ✨ 統一用 Spring Security Context 抓取當前登入者 (團主) ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long hostId = Long.parseLong(userIdStr);
-
+        String reason = (requestBody != null && requestBody.containsKey("reason"))
+                ? requestBody.get("reason")
+                : "未提供備註";
         // 呼叫 Service 執行踢除邏輯
-        campaignService.kickParticipant(hostId, campaignId, targetUserId);
+        campaignService.kickParticipant(hostId, campaignId, targetUserId ,reason);
 
         return ResponseEntity.ok(Map.of(
                 "success", true,
@@ -261,6 +282,48 @@ public class CampaignController {
         MyParticipationResponse response = campaignService.getMyParticipation(campaignId, userId);
 
         return ResponseEntity.ok(response);
+    }
+
+    // 🌟 團主專用：標記特定團員棄單
+    @PutMapping("/{campaignId}/participants/{userId}/no-show")
+    public ResponseEntity<?> markNoShow(
+            @PathVariable Long campaignId,
+            @PathVariable("userId") Long targetUserId,
+            @RequestBody(required = false) Map<String, String> requestBody) { // 🌟 允許前端傳入 JSON
+
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long currentUserId = Long.parseLong(userIdStr);
+        // 抓出備註，如果沒填就給個預設值
+        String note = (requestBody != null && requestBody.containsKey("note"))
+                ? requestBody.get("note")
+                : "未提供備註";
+
+        campaignService.markParticipantAsNoShow(currentUserId, campaignId, targetUserId ,note);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "已成功標記該團員為未現身/棄單。系統已發送通知提醒對方。"
+        ));
+    }
+
+    // 🌟 團員專用：提出仲裁
+    // 這裡用一個簡單的 Map 接前端傳來的 reason (原因)
+    @PostMapping("/{campaignId}/dispute")
+    public ResponseEntity<?> raiseDispute(
+            @PathVariable Long campaignId,
+            @RequestBody(required = false) Map<String, String> requestBody) {
+
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        String reason = requestBody.getOrDefault("reason", "未提供原因");
+
+        campaignService.raiseDispute(currentUserId, campaignId, reason);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "已成功提出仲裁！此訂單已凍結，請在聊天室上傳相關對話或圖片證據，將由管理員介入處理。"
+        ));
     }
 
 }

@@ -2,7 +2,7 @@
 -- ==============================================================================
 -- 1. 基礎設定與實體店鋪 (Infrastructure)
 -- ==============================================================================
-USE `gkp`;
+USE `gbc`;
 CREATE TABLE stores (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL COMMENT '門市名稱 (例：中和店)',
@@ -185,17 +185,21 @@ CREATE TABLE `campaigns` (
   CONSTRAINT `campaigns_ibfk_4` FOREIGN KEY (`blame_user_id`) REFERENCES `users` (`id`)
 ) ;
 
-CREATE TABLE participants (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    campaign_id BIGINT NOT NULL COMMENT '所屬合購單',
-    user_id BIGINT NOT NULL COMMENT '參與者',
-    quantity INT NOT NULL COMMENT '認購數量',
-    status VARCHAR(50) DEFAULT 'JOINED' COMMENT '狀態 (JOINED, CANCELLED, NO_SHOW)',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    UNIQUE KEY unique_participant (campaign_id, user_id) -- 確保一人在一團只有一筆狀態紀錄
+CREATE TABLE `participants` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `campaign_id` bigint NOT NULL COMMENT '所屬合購單',
+  `user_id` bigint NOT NULL COMMENT '參與者',
+  `quantity` int NOT NULL COMMENT '認購數量',
+  `status` varchar(50) DEFAULT 'JOINED' COMMENT '狀態 (JOINED, CANCELLED, NO_SHOW)',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `dispute_reason` varchar(500) DEFAULT NULL,
+  `host_note` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_participant` (`campaign_id`,`user_id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `participants_ibfk_1` FOREIGN KEY (`campaign_id`) REFERENCES `campaigns` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `participants_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 );
 
 -- ==============================================================================

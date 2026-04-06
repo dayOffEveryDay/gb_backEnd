@@ -3,6 +3,8 @@ package com.costco.gb.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "campaigns")
@@ -64,4 +66,9 @@ public class Campaign extends BaseEntity {
     @Builder.Default
     @Column(name = "allow_revision", nullable = false)
     private boolean allowRevision = false;
+
+    @OneToMany(mappedBy = "campaign", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ToString.Exclude // ⚠️ 防雷必加：防止 Lombok 產生 toString() 時引發無限迴圈
+    @EqualsAndHashCode.Exclude
+    private List<Participant> participants = new ArrayList<>();
 }

@@ -7,6 +7,7 @@ import com.costco.gb.dto.response.CampaignSummaryResponse;
 import com.costco.gb.dto.response.HostDashboardResponse;
 import com.costco.gb.dto.response.MyParticipationResponse;
 import com.costco.gb.entity.*;
+import com.costco.gb.mapper.CampaignMapper;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value; // 貼上這行
@@ -41,24 +42,26 @@ public class CampaignService {
     private final String UPLOAD_DIR = "uploads/campaigns/";
     private final CreditScoreLogRepository creditScoreLogRepository;
     private final NotificationService notificationService;
+    private final CampaignMapper campaignMapper;
 
 
     // 🌟 注入 YML 裡的 base-url 參數
     @Value("${app.base-url}")
     private String baseUrl;
 
-    // 把參數補上 categoryId 和 keyword
-    public Page<CampaignSummaryResponse> getActiveCampaigns(Integer storeId, Integer categoryId, String keyword, int page, int size) {
+    // ✨ 參數補上 currentUserId
+    public Page<CampaignSummaryResponse> getActiveCampaigns(
+            Integer storeId, Integer categoryId, String keyword, Long currentUserId, int page, int size) {
 
         // 1. 設定分頁與排序 (依建立時間倒序，越新的在越上面)
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
-        // 2. 呼叫強大的動態查詢 (取代原本冗長的 if-else)
+        // 2. 呼叫強大的動態查詢 (把 currentUserId 傳進去)
         Page<Campaign> campaignPage = campaignRepository.findCampaignsWithFilters(
-                storeId, categoryId, keyword, pageable);
+                storeId, categoryId, keyword, currentUserId, pageable);
 
         // 3. 將 Entity 轉換為 DTO 回傳
-        return campaignPage.map(this::mapToSummaryResponse);
+        return campaignPage.map(campaignMapper::toSummaryResponse);
     }
 
 
@@ -171,7 +174,7 @@ public class CampaignService {
         Page<Campaign> campaigns = campaignRepository.findByHostIdOrderByCreatedAtDesc(userId, pageable);
 
         // 呼叫我們之前寫好、帶有完整圖片網址的 mapToSummaryResponse
-        return campaigns.map(this::mapToSummaryResponse);
+        return campaigns.map(campaignMapper::toSummaryResponse);
     }
 
     // 🌟 查詢我參與的合購單
@@ -180,45 +183,45 @@ public class CampaignService {
         Page<Campaign> campaigns = campaignRepository.findJoinedCampaignsByUserId(userId, pageable);
 
         // 一樣無痛轉成前端需要的 DTO 格式
-        return campaigns.map(this::mapToSummaryResponse);
+        return campaigns.map(campaign -> campaignMapper.toSummaryResponse(campaign, userId));
     }
     // 輔助方法：Entity 轉 DTO
-    private CampaignSummaryResponse mapToSummaryResponse(Campaign campaign) {
-
-        // 🌟 1. 處理圖片字串，轉換成前端可直接讀取的完整網址 List
-        List<String> imageUrlList = new java.util.ArrayList<>();
-        if (campaign.getImageUrls() != null && !campaign.getImageUrls().isEmpty()) {
-            String[] images = campaign.getImageUrls().split(",");
-            for (String img : images) {
-                // 🌟 直接將 baseUrl 與圖片路徑組裝成完整網址！
-                // (例如: "http://localhost:8080/images/uuid.jpg")
-                imageUrlList.add(baseUrl + "/images/" + img);
-            }
-        }
-
-        // 🌟 2. 組裝回傳物件
-        return CampaignSummaryResponse.builder()
-                .id(campaign.getId())
-                .itemName(campaign.getItemName())
-                .imageUrls(imageUrlList) // 👈 改成塞入我們剛組裝好的 List
-                .scenarioType(campaign.getScenarioType())
-                .pricePerUnit(campaign.getPricePerUnit())
-                .totalQuantity(campaign.getTotalQuantity())
-                .availableQuantity(campaign.getAvailableQuantity())
-                .meetupLocation(campaign.getMeetupLocation())
-                .meetupTime(campaign.getMeetupTime())
-                .expireTime(campaign.getExpireTime())
-                .status(campaign.getStatus())
-                .storeName(campaign.getStore().getName())
-                .categoryName(campaign.getCategory().getName())
-                .host(CampaignSummaryResponse.HostSummary.builder()
-                        .id(campaign.getHost().getId())
-                        .displayName(campaign.getHost().getDisplayName())
-                        .profileImageUrl(campaign.getHost().getProfileImageUrl())
-                        .creditScore(campaign.getHost().getCreditScore())
-                        .build())
-                .build();
-    }
+//    private CampaignSummaryResponse mapToSummaryResponse(Campaign campaign) {
+//
+//        // 🌟 1. 處理圖片字串，轉換成前端可直接讀取的完整網址 List
+//        List<String> imageUrlList = new java.util.ArrayList<>();
+//        if (campaign.getImageUrls() != null && !campaign.getImageUrls().isEmpty()) {
+//            String[] images = campaign.getImageUrls().split(",");
+//            for (String img : images) {
+//                // 🌟 直接將 baseUrl 與圖片路徑組裝成完整網址！
+//                // (例如: "http://localhost:8080/images/uuid.jpg")
+//                imageUrlList.add(baseUrl + "/images/" + img);
+//            }
+//        }
+//
+//        // 🌟 2. 組裝回傳物件
+//        return CampaignSummaryResponse.builder()
+//                .id(campaign.getId())
+//                .itemName(campaign.getItemName())
+//                .imageUrls(imageUrlList) // 👈 改成塞入我們剛組裝好的 List
+//                .scenarioType(campaign.getScenarioType())
+//                .pricePerUnit(campaign.getPricePerUnit())
+//                .totalQuantity(campaign.getTotalQuantity())
+//                .availableQuantity(campaign.getAvailableQuantity())
+//                .meetupLocation(campaign.getMeetupLocation())
+//                .meetupTime(campaign.getMeetupTime())
+//                .expireTime(campaign.getExpireTime())
+//                .status(campaign.getStatus())
+//                .storeName(campaign.getStore().getName())
+//                .categoryName(campaign.getCategory().getName())
+//                .host(CampaignSummaryResponse.HostSummary.builder()
+//                        .id(campaign.getHost().getId())
+//                        .displayName(campaign.getHost().getDisplayName())
+//                        .profileImageUrl(campaign.getHost().getProfileImageUrl())
+//                        .creditScore(campaign.getHost().getCreditScore())
+//                        .build())
+//                .build();
+//    }
 
     // 🌟 團主專用：修改合購單數量
     @Transactional
@@ -291,6 +294,7 @@ public class CampaignService {
         // 2. 將團員名單轉換成 DTO
         List<HostDashboardResponse.ParticipantDetail> participantDetails = allParticipants.stream()
                 .map(p -> HostDashboardResponse.ParticipantDetail.builder()
+                        .participantsId(p.getId())
                         .userId(p.getUser().getId())
                         .displayName(p.getUser().getDisplayName() != null ? p.getUser().getDisplayName() : "匿名會員")
                         .quantity(p.getQuantity())
@@ -356,17 +360,18 @@ public class CampaignService {
 
         if (optionalParticipant.isPresent()) {
             Participant existingParticipant = optionalParticipant.get();
+            String currentStatus = existingParticipant.getStatus();
 
-            // 🛡️ 判斷 1：他是不是曾經跳車，現在要「重新上車」？
-            if ("CANCELLED".equals(existingParticipant.getStatus())) {
+            // 🛡️ 判斷 1：他是不是曾經跳車，或「被踢除」，現在要「重新上車」？
+            if ("CANCELLED".equals(currentStatus) || "KICKED".equals(currentStatus)) {
                 existingParticipant.setStatus("JOINED"); // 🌟 狀態復活！
                 existingParticipant.setQuantity(request.getQuantity()); // 數量不累加，直接覆蓋成這次要求的新數量
 
-                log.info("User {} 重新加入了合購單 {} (狀態復活)，數量: {}",
-                        userId, campaignId, request.getQuantity());
+                log.info("User {} 重新加入了合購單 {} (從 {} 狀態復活)，數量: {}",
+                        userId, campaignId, currentStatus, request.getQuantity());
             }
-            // 🛡️ 判斷 2：他原本就在車上，只是要「追加數量」
-            else {
+            // 🛡️ 判斷 2：他原本就在車上，只是要「追加數量」 (改為明確判斷 JOINED)
+            else if ("JOINED".equals(currentStatus)) {
                 existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
 
                 log.info("User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
@@ -404,19 +409,31 @@ public class CampaignService {
 
     // 🌟 團主專用：踢除裝死或惡意團員
     @Transactional
-    public void kickParticipant(Long hostId, Long campaignId, Long targetUserId) {
+    public void kickParticipant(Long hostId, Long campaignId, Long targetUserId, String reason) {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
 
         if (!campaign.getHost().getId().equals(hostId)) {
             throw new RuntimeException("只有團主可以踢人！");
         }
+        // 🛡️ 防護 1-A：精準攔截面交階段，引導團主使用正確功能
+        if ("DELIVERED".equals(campaign.getStatus()) || "CONFIRMED".equals(campaign.getStatus())) {
+            throw new RuntimeException("合購單已進入面交階段！若團員未現身，請改用「標記棄單 (NO_SHOW)」功能。");
+        }
 
+        // 🛡️ 防護 1-B：嚴格白名單 (只允許 OPEN 和 FULL)
+        if (!"OPEN".equals(campaign.getStatus()) && !"FULL".equals(campaign.getStatus())) {
+            throw new RuntimeException("合購單目前狀態為 " + campaign.getStatus() + "，已無法執行踢人操作。");
+        }
         Participant participant = participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, targetUserId, "JOINED")
                 .orElseThrow(() -> new RuntimeException("找不到該名參團中的團員"));
-
+        // 🛡️ 防護 2：團員狀態檢查 (只能踢正在車上的人！)
+        if (!"JOINED".equals(participant.getStatus())) {
+            throw new RuntimeException("該團員目前狀態為 " + participant.getStatus() + "，無法進行踢除。");
+        }
         // 1. 強制改變狀態為已取消
-        participant.setStatus("CANCELLED");
+        participant.setStatus("KICKED");
+        participant.setHostNote(reason);
         participantRepository.save(participant);
 
         // 2. 釋放他佔用的數量
@@ -744,6 +761,71 @@ public class CampaignService {
                         .isJoined(false) // 如果被 CANCELLED 了，這裡就會找不到，變成未參加！
                         .quantity(0)
                         .build());
+    }
+
+    // 🌟 API 1：團主標記團員棄單/未現身 (NO_SHOW)
+    @Transactional
+    public void markParticipantAsNoShow(Long currentUserId, Long campaignId, Long targetUserId, String note) {
+
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 🛡️ 防護 1：驗證操作者是不是這張單的團主
+        if (!campaign.getHost().getId().equals(currentUserId)) {
+            throw new RuntimeException("越權操作！只有該單的團主可以標記團員棄單。");
+        }
+
+        Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, targetUserId)
+                .orElseThrow(() -> new RuntimeException("找不到該團員的參團紀錄"));
+
+        String currentStatus = participant.getStatus();
+
+        // 🛡️ 防護 2：只有 JOINED (裝死中) 或是他偷按了 COMPLETED 的情況，團主才可以行使「一票否決權」
+        if (!"JOINED".equals(currentStatus) && !"COMPLETED".equals(currentStatus)) {
+            throw new RuntimeException("該團員目前狀態為 " + currentStatus + "，無法標記為棄單。");
+        }
+
+        // 🎯 執行狀態變更
+        participant.setStatus("NO_SHOW");
+        participant.setHostNote(note); // 🌟 關鍵：存入團主的備註
+        participantRepository.save(participant);
+
+        log.info("🚨 團主 {} 已將團員 {} 標記為棄單 (合購單 {})", currentUserId, targetUserId, campaignId);
+
+        // 🌟 觸發推播：警告團員已被標記棄單，提醒他有權利提出仲裁！
+        notificationService.notifyUserNoShowWarning(participant.getUser(), campaign);
+    }
+
+
+    // 🌟 API 2：團員提出仲裁/爭議 (DISPUTED)
+    @Transactional
+    public void raiseDispute(Long currentUserId, Long campaignId, String reason) {
+
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, currentUserId)
+                .orElseThrow(() -> new RuntimeException("找不到您的參團紀錄"));
+
+        String currentStatus = participant.getStatus();
+
+        // 🛡️ 防護：什麼情況可以按仲裁？
+        // 1. JOINED (面交時間過了，團主消失或沒給貨)
+        // 2. NO_SHOW (被團主誣賴棄單，我要反擊！)
+        if (!"JOINED".equals(currentStatus) && !"NO_SHOW".equals(currentStatus)) {
+            throw new RuntimeException("您目前的狀態無法提出仲裁。");
+        }
+
+        // 🎯 執行狀態變更
+        participant.setStatus("DISPUTED");
+        participant.setDisputeReason(reason);
+        participantRepository.save(participant);
+
+        // 如果資料庫有開欄位，這裡可以把 reason (爭議原因) 存起來，或是自動發送一則系統訊息到該合購單的聊天室
+        log.info("⚖️ 團員 {} 對合購單 {} 提出仲裁！原因: {}", currentUserId, campaignId, reason);
+
+        // 🌟 觸發推播：通知團主有人提出爭議了，訂單已凍結！
+        notificationService.notifyHostAboutDispute(campaign);
     }
 
 }
