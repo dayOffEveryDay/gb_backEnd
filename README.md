@@ -1,58 +1,201 @@
 # gb_backEnd
-揪買好市多
-# Costco Group Buying 🛒 (好市多合購網)
 
-為了解決台灣小家庭與單身族群面對好市多大份量商品「想買但吃不完/用不完」的痛點，本專案提供一個輕量、即時的在地化（LBS）合購媒合服務。
+## Latest Updates
 
-## 💡 核心商業邏輯 (Core Concept)
-* **不碰金流：** 平台純粹提供媒合與溝通管道，使用者於現場面交並自行處理帳務，免除第三方支付手續費與退換貨法規問題。
-* **無官方商品資料庫：** 採用「預設大分類標籤」搭配「使用者自填名稱與現場拍照」，大幅降低初期維護商品型錄的營運成本。
-* **信任與防護：** 透過 Line 真實帳號綁定、信用評分機制與黑名單功能，建立互信的社群環境。
+- Added review status query support so the client can check whether the current user has already reviewed a target user in a campaign.
+- Campaigns now record `completed_at` when all joined participants confirm receipt.
+- When a campaign becomes `COMPLETED`, the system sends review reminder notifications to the host and confirmed participants.
+- WebSocket chat subscription now validates room access and blocks expired/completed chat rooms after the grace period.
 
----
+Costco 團購平台後端專案，使用 Spring Boot 提供 REST API、JWT 驗證、WebSocket 即時聊天室與通知推播。
 
-## 📍 使用場景 (Use Cases)
+## 專案概述
 
-### 場景 1：賣場內即時湊單 (LBS 即時配對)
-* **情境：** 會員正在好市多逛街，看到想嘗鮮的新飲料或生鮮，但只需少量。
-* **動作：** 開啟 Web App 抓取當下 GPS 定位，發起一筆「即時合購單」，設定短效期（如 30 分鐘）與認購數量。
-* **觸發：** 系統透過 Redis GEO 撈出賣場附近的會員，並針對有訂閱該商品「分類標籤」的會員發送站內即時推播。
-* **結果：** 湊滿後自動關單，雙方透過專屬聊天室約定結帳機台或熟食區面交。
+這個專案的核心目標，是讓使用者能以 Costco 商品分購為主題建立團購、參與他人團購、在面交前透過聊天室協調細節，並在交易完成後透過評價與信用分數機制累積信任。
 
-### 場景 2：未來預約分購 (排程開團)
-* **情境：** 會員預計週末前往特定好市多門市（如：中和店），想提前找人分攤特定商品（如：特定牛肉部位）。
-* **動作：** 發起「預約合購單」，指定未來時間、門市地點與預計面交地點。
-* **觸發：** 系統通知關注該團購主（Followers）或對該門市/商品分類有興趣的會員。
+目前後端已涵蓋：
 
----
+- LINE OAuth 登入與 JWT 驗證
+- 團購建立、參加、修改、退出、取消、交付、收貨確認
+- 滿團後由主揪解鎖修改、踢除團員
+- 即時聊天室與 WebSocket 推播通知
+- 主揪追蹤、封鎖名單、使用者公開資料
+- 評價與信用分數紀錄
 
-## 🚀 核心功能清單 (Features)
+## 技術棧
 
-### 1. 會員與社交系統
-* **Line OAuth2 登入：** 快速註冊並防堵惡意假帳號。
-* **信用評分與拉黑機制：** 雙方交易後可互評，系統自動記錄放鳥次數（No-show），達標自動凍結帳號。使用者可將惡劣會員加入黑名單，不再看見彼此的團單。
-* **關注團購主 (Follow)：** 可追蹤優質發起人，第一時間接收開團通知。
+- Java 17
+- Spring Boot 3.2.3
+- Spring Web
+- Spring Data JPA
+- Spring Security
+- Spring Validation
+- Spring WebSocket + STOMP
+- Spring Data Redis
+- MySQL
+- JWT (`jjwt`)
+- Thumbnailator
+- Lombok
+- Gradle
 
-### 2. 開團與認購機制
-* **防超賣扣庫存：** 核心認購邏輯依賴 Redis 保證高併發下的原子性操作（Atomicity），絕不超賣。
-* **狀態機與排程流局：** 後端利用定時排程（Scheduled Tasks）自動掃描並處理過期未滿單的合購，將其標示為流局。
+## 主要模組
 
-### 3. 即時通訊與通知
-* **專屬聊天室：** 工作區已新增 WebSocket + STOMP 聊天室實作，團主與團員可在同一張合購單底下即時對話，聊天紀錄寫入 `chat_messages`，並可透過 REST API 載入歷史訊息。
-* **站內小鈴鐺推播：** 工作區已新增滿單通知流程，合購滿單時會先寫入 `notifications`，再透過 WebSocket 單播到 `/user/queue/notifications`。
+專案主要程式碼位於 `src/main/java/com/costco/gb`，目前結構包含：
 
----
+- `controller`：REST API 與 WebSocket 入口
+- `service`：主要業務邏輯
+- `repository`：資料存取層
+- `entity`：JPA Entity
+- `dto`：請求與回應資料模型
+- `security`：JWT 與 Spring Security 設定
+- `config`：WebSocket、靜態資源、TraceId 等設定
+- `scheduler`：排程任務
+- `mapper`：Entity 與 DTO 轉換
 
-## 🛠️ 系統架構與技術選型 (Tech Stack)
+## 已實作功能
 
-* **前端 (Frontend):** React (SPA/PWA)
-  * UI 偏好（如深色/淺色模式）儲存於 `localStorage`。
-  * 即時功能目前以 WebSocket / STOMP 為主要方向。
-* **後端 (Backend):** Java Spring Boot
-  * 採用 Event-Driven (事件驅動) 架構處理發單後的非同步通知配對，確保主執行緒極速回應。
-* **資料庫 (Database):** MySQL / PostgreSQL (RDS)
-  * 高度正規化設計：包含 `users`, `campaigns`, `participants`, `reviews`, `categories`, `user_preferences`, `notifications`, `chat_messages`。
-* **快取與空間運算 (Cache & Geospatial):** Redis
-  * 負責即時庫存扣減防超賣。
-  * 處理 GPS 經緯度運算 (`GEOSEARCH`)，尋找附近的使用者。
-* **基礎設施 (Infrastructure):** Docker 容器化部署，運行於 AWS EC2。
+### 1. 認證與使用者
+
+- LINE OAuth 登入
+- 開發用快速登入
+- JWT 驗證
+- 更新個人資料
+- 查詢使用者公開資料
+- 封鎖與解除封鎖使用者
+- 查詢封鎖名單
+- 追蹤與取消追蹤主揪
+- 查詢我的追蹤清單
+
+### 2. 團購流程
+
+- 查詢活動列表，可依門市、分類、關鍵字篩選
+- 建立團購活動與上傳圖片
+- 主揪調整開團數量與保留量
+- 參加團購
+- 修改參與數量
+- 退出團購
+- 主揪取消活動
+- 主揪標記已交付
+- 團員確認收貨
+- 滿單後主揪可解鎖修改權限
+- 主揪可踢除指定團員
+- 查詢我的主揪活動
+- 查詢我的參與活動
+- 查詢我的信用分數紀錄
+- 查詢主揪活動儀表板
+
+### 3. 即時互動
+
+- 團購聊天室歷史訊息查詢
+- WebSocket / STOMP 即時聊天
+- WebSocket 個人通知推播
+- 滿團、取消、退出、被踢除等通知寫入資料庫並即時推送
+
+### 4. 信用與評價
+
+- 新增交易評價
+- 依評價調整信用分數
+- 寫入信用分數異動紀錄
+- 排程處理主揪放鳥情境
+
+## 主要 API 分類
+
+目前主要 API 路徑如下：
+
+- `/api/v1/auth`
+- `/api/v1/campaigns`
+- `/api/v1/users`
+- `/api/v1/reviews`
+- `/api/v1/notifications`
+- `/api/v1/follows`
+- `/api/v1/stores`
+- `/api/v1/categories`
+
+詳細欄位與範例請參考：
+
+- [API.md](/c:/Users/a-hui/IdeaProjects/ahui/costco/gb_backEnd/API.md)
+- [DB_SCHEMA.md](/c:/Users/a-hui/IdeaProjects/ahui/costco/gb_backEnd/DB_SCHEMA.md)
+- [Function.md](/c:/Users/a-hui/IdeaProjects/ahui/costco/gb_backEnd/Function.md)
+
+## WebSocket 說明
+
+- STOMP 端點：`/ws`
+- Client Send Prefix：`/app`
+- Topic Prefix：`/topic`
+- User Queue Prefix：`/user`
+
+聊天室訊息：
+
+- 發送：`/app/chat/{campaignId}/sendMessage`
+- 訂閱：`/topic/campaigns/{campaignId}`
+
+個人通知：
+
+- 訂閱：`/user/queue/notifications`
+
+連線時需帶入：
+
+```http
+Authorization: Bearer <JWT_TOKEN>
+```
+
+## 本機啟動需求
+
+啟動前請先準備：
+
+- Java 17
+- MySQL
+- Redis
+
+預設設定位於 `src/main/resources/application.yml`：
+
+- MySQL：`jdbc:mysql://localhost:3306/gbc`
+- Redis：`localhost:6379`
+- Server Port：`8080`
+
+建議環境變數：
+
+- `DB_USERNAME`
+- `GBC_DB_PASSWORD`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `GBC_LINE_CHANNEL_ID`
+- `GBC_LINE_CHANNEL_SECRET`
+- `APP_BASE_URL`
+
+## 執行方式
+
+啟動專案：
+
+```bash
+./gradlew bootRun
+```
+
+執行測試：
+
+```bash
+./gradlew test
+```
+
+Windows 也可使用：
+
+```powershell
+.\gradlew.bat bootRun
+.\gradlew.bat test
+```
+
+## 圖片與靜態資源
+
+團購圖片會儲存在：
+
+- `uploads/campaigns/`
+
+對外存取路徑：
+
+- `/images/{fileName}`
+
+## 備註
+
+- 目前 `spring.jpa.hibernate.ddl-auto` 設為 `update`
+- JWT、LINE OAuth、Redis 與 WebSocket 都已串接在同一專案中
+- 若要對照資料表與 API 行為，請以程式碼與 `API.md` / `DB_SCHEMA.md` 為準

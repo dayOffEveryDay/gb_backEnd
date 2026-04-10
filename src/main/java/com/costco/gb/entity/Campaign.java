@@ -67,6 +67,9 @@ public class Campaign extends BaseEntity {
     @Column(name = "allow_revision", nullable = false)
     private boolean allowRevision = false;
 
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
     @OneToMany(mappedBy = "campaign", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude // ⚠️ 防雷必加：防止 Lombok 產生 toString() 時引發無限迴圈
     @EqualsAndHashCode.Exclude

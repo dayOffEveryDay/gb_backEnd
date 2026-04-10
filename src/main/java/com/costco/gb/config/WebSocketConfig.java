@@ -14,6 +14,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final WebSocketAuthInterceptor webSocketAuthInterceptor;
+    private final ChatRoomInterceptor chatRoomInterceptor;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -42,6 +43,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         // 5. 將 JWT 驗證攔截器接上 inbound channel，讓 CONNECT 時能解析 Authorization
-        registration.interceptors(webSocketAuthInterceptor);
+        // 5-1. 先過 authInterceptor 確保是合法登入的使用者
+        // 5-2. 再過 chatRoomInterceptor 確保他有權限/房間未關閉
+        registration.interceptors(webSocketAuthInterceptor,chatRoomInterceptor);
     }
 }

@@ -13,6 +13,24 @@
 - `CreditScoreLog.scoreChange` records the exact delta for each score change.
 - Score deduction for host no-show is `-10`.
 
+### Review status query
+
+- `ReviewController` now exposes `GET /api/v1/reviews/check`.
+- `ReviewService.checkReviewStatus(...)` returns whether the current user already reviewed the target user for the given campaign.
+- `ReviewStatusResponse` includes `isReviewed`, `rating`, and `comment`.
+
+### Campaign completion workflow
+
+- `Campaign.completedAt` is set when all joined participants confirm receipt.
+- `confirmReceipt(...)` now triggers `notificationService.notifyReviewTime(campaign)` after the campaign becomes `COMPLETED`.
+- `notifyReviewTime(...)` sends `CAMPAIGN_COMPLETED` notifications to the host and all confirmed participants.
+
+### WebSocket room guard
+
+- `ChatRoomInterceptor` is registered on the STOMP inbound channel after JWT authentication.
+- Subscription is allowed only for the host or participants in allowed statuses.
+- Completed campaign chat remains accessible for 3 days after `completedAt`.
+
 本文件整理目前專案 `gb_backEnd` 主要 service / WebSocket / 新增功能邏輯，內容以 `src/main/java/com/costco/gb` 實際程式碼為準，並補上這次工作區尚未提交的聊天與通知功能。
 
 ---

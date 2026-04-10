@@ -53,4 +53,6 @@ public interface ParticipantRepository extends JpaRepository<Participant, Long> 
     int countByUserIdAndStatus(Long userId, String status);
 
 
+    // 檢查該使用者是否為該合購單的團員，且狀態必須在我們允許的名單內
+    boolean existsByCampaignIdAndUserIdAndStatusIn(Long campaignId, Long userId, List<String> statuses);
 }

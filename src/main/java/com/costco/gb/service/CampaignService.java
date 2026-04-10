@@ -634,10 +634,10 @@ public class CampaignService {
         if (remainingJoined == 0) {
             // 所有人都確認了，這張單功德圓滿！
             campaign.setStatus("COMPLETED");
+            campaign.setCompletedAt(LocalDateTime.now());
             campaignRepository.save(campaign);
             log.info("🎉 合購單 {} 的所有團員皆已確認收貨，訂單正式 COMPLETED！", campaignId);
-
-            // TODO: 未來可在此時發送推播通知，提醒雙方可以開始互給「評價 (Review)」了！
+            notificationService.notifyReviewTime(campaign);
         }
     }
     // ==========================================

@@ -1,6 +1,7 @@
 package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateReviewRequest;
+import com.costco.gb.dto.response.ReviewStatusResponse;
 import com.costco.gb.entity.Campaign;
 import com.costco.gb.entity.CreditScoreLog;
 import com.costco.gb.entity.Review;
@@ -115,4 +116,21 @@ public class ReviewService {
                     reviewee.getId(), scoreChange, newScore);
         }
     }
+
+    // 🌟 1. 新增：查詢評價狀態
+    @Transactional(readOnly = true)
+    public ReviewStatusResponse checkReviewStatus(Long campaignId, Long reviewerId, Long revieweeId) {
+        return reviewRepository.findByCampaignIdAndReviewerIdAndRevieweeId(campaignId, reviewerId, revieweeId)
+                .map(review -> ReviewStatusResponse.builder()
+                        .isReviewed(true)
+                        .rating(review.getRating())
+                        .comment(review.getComment())
+                        .build()
+                )
+                .orElse(ReviewStatusResponse.builder()
+                        .isReviewed(false)
+                        .build()
+                );
+    }
+
 }

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 @Repository
 public interface ReviewRepository extends JpaRepository<Review, Long> {
@@ -15,4 +16,7 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     // 2. 🌟 新版防刷單核心：檢查 7 天內是否已經給過「有效加分」的評價
     boolean existsByReviewerIdAndRevieweeIdAndIsScoreCountedTrueAndCreatedAtAfter(
             Long reviewerId, Long revieweeId, LocalDateTime sevenDaysAgo);
+
+    // 在 ReviewRepository.java 裡面：
+    Optional<Review> findByCampaignIdAndReviewerIdAndRevieweeId(Long campaignId, Long reviewerId, Long revieweeId);
 }

@@ -1,6 +1,7 @@
 package com.costco.gb.controller;
 
 import com.costco.gb.dto.request.CreateReviewRequest;
+import com.costco.gb.dto.response.ReviewStatusResponse;
 import com.costco.gb.service.ReviewService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -30,5 +31,19 @@ public class ReviewController {
                 "success", true,
                 "message", "評價成功！感謝您的回饋。"
         ));
+    }
+
+    @GetMapping("/check")
+    public ResponseEntity<ReviewStatusResponse> checkMyReviewStatus(
+            @RequestParam Long campaignId,
+            @RequestParam Long revieweeId) {
+
+        // 取得當前使用者 (評價者)
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        ReviewStatusResponse status = reviewService.checkReviewStatus(campaignId, currentUserId, revieweeId);
+
+        return ResponseEntity.ok(status);
     }
 }

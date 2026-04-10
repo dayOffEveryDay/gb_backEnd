@@ -174,6 +174,7 @@ CREATE TABLE `campaigns` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `allow_revision` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否允許滿單後修改',
+  `completed_at` datetime DEFAULT NULL COMMENT '合購單結案時間',
   PRIMARY KEY (`id`),
   KEY `host_id` (`host_id`),
   KEY `category_id` (`category_id`),
@@ -183,7 +184,7 @@ CREATE TABLE `campaigns` (
   CONSTRAINT `campaigns_ibfk_2` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`),
   CONSTRAINT `campaigns_ibfk_3` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`),
   CONSTRAINT `campaigns_ibfk_4` FOREIGN KEY (`blame_user_id`) REFERENCES `users` (`id`)
-) ;
+)  ;
 
 CREATE TABLE `participants` (
   `id` bigint NOT NULL AUTO_INCREMENT,

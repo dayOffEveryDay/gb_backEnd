@@ -13,6 +13,22 @@
 - `GET /api/v1/campaigns/me/credit-logs` returns actual score deltas in `scoreChange`.
 - Example values include `+1`, `-3`, and `-10`.
 
+### Review status query
+
+- `GET /api/v1/reviews/check?campaignId={campaignId}&revieweeId={revieweeId}` returns whether the current user has already reviewed the target user in that campaign.
+- Response fields: `isReviewed`, `rating`, `comment`.
+
+### Campaign completion
+
+- When the last joined participant confirms receipt, the campaign becomes `COMPLETED` and `completed_at` is recorded.
+- The system then sends `CAMPAIGN_COMPLETED` notifications to the host and all `CONFIRMED` participants.
+
+### WebSocket chat access
+
+- STOMP subscribe to `/topic/campaigns/{campaignId}` now requires the current user to be the host or an allowed participant.
+- Closed rooms are blocked for `CANCELLED` campaigns.
+- `COMPLETED` campaigns keep chat access for 3 days after `completed_at`, then subscription is denied.
+
 本文件依據目前 `gb_backEnd` 程式碼整理，來源包含 `controller`、`dto`、`service`、`security` 與 `websocket` 設定。
 
 ## 基本資訊
