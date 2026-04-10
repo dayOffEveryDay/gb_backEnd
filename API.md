@@ -1,5 +1,18 @@
 # API
 
+## Implementation Notes
+
+### Host cancellation
+
+- `POST /api/v1/campaigns/{id}/cancel` currently cancels the campaign and joined participants.
+- This endpoint currently does not deduct host credit score.
+- This endpoint currently does not create a `CreditScoreLog`.
+
+### Credit log query
+
+- `GET /api/v1/campaigns/me/credit-logs` returns actual score deltas in `scoreChange`.
+- Example values include `+1`, `-3`, and `-10`.
+
 本文件依據目前 `gb_backEnd` 程式碼整理，來源包含 `controller`、`dto`、`service`、`security` 與 `websocket` 設定。
 
 ## 基本資訊

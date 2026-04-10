@@ -1,5 +1,18 @@
 # Function.md
 
+## Implementation Notes
+
+### Host manual cancellation
+
+- `cancelCampaignByHost(...)` currently updates campaign and participant status only.
+- It currently does not deduct host credit score.
+- It currently does not write a `CreditScoreLog`.
+
+### Credit score logs
+
+- `CreditScoreLog.scoreChange` records the exact delta for each score change.
+- Score deduction for host no-show is `-10`.
+
 本文件整理目前專案 `gb_backEnd` 主要 service / WebSocket / 新增功能邏輯，內容以 `src/main/java/com/costco/gb` 實際程式碼為準，並補上這次工作區尚未提交的聊天與通知功能。
 
 ---

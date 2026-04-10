@@ -1,5 +1,11 @@
 # Schedule.md
 
+## Implementation Notes
+
+- `huntGhostedCampaigns` handles the scheduled `HOST_NO_SHOW` case only.
+- In that flow, the host loses `10` credit points and one `CreditScoreLog` is created.
+- Host manual campaign cancellation is not part of this deduction flow and currently does not deduct credit score.
+
 本文件整理目前專案已實作的排程工作，內容以 `CampaignScheduler` 與其對應 service/repository 行為為準。
 
 ---
