@@ -1,9 +1,13 @@
 package com.costco.gb.controller;
 
 import com.costco.gb.dto.request.CreateReviewRequest;
+import com.costco.gb.dto.response.ReviewResponse;
 import com.costco.gb.dto.response.ReviewStatusResponse;
 import com.costco.gb.service.ReviewService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -45,5 +49,19 @@ public class ReviewController {
         ReviewStatusResponse status = reviewService.checkReviewStatus(campaignId, currentUserId, revieweeId);
 
         return ResponseEntity.ok(status);
+    }
+
+    // 🌟 獲取我的評價看板 (別人給我的)
+    @GetMapping("/me/received")
+    public ResponseEntity<Page<ReviewResponse>> getMyReceivedReviews(
+            @PageableDefault(size = 10) Pageable pageable) {
+
+        // 取出當前登入者 ID
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        Page<ReviewResponse> responses = reviewService.getMyReceivedReviews(currentUserId, pageable);
+
+        return ResponseEntity.ok(responses);
     }
 }

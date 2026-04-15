@@ -1,11 +1,12 @@
 # DB Schema
 
-## Latest Updates
+## 最新資料結構備註
 
-- `campaigns.completed_at` is used to record when a campaign is fully completed.
-- Current `campaigns.status` usage in code includes `OPEN`, `FULL`, `DELIVERED`, `COMPLETED`, `CANCELLED`, and `HOST_NO_SHOW`.
-- `notifications.type` now includes `CAMPAIGN_COMPLETED` for review reminder pushes after campaign completion.
-- Review lookup uses the existing unique key on `(campaign_id, reviewer_id, reviewee_id)` to query whether a review already exists.
+- `campaigns.completed_at` 用來記錄合購正式完成時間。
+- 目前程式使用的 `campaigns.status` 包含 `OPEN`、`FULL`、`DELIVERED`、`COMPLETED`、`CANCELLED`、`HOST_NO_SHOW`。
+- `notifications.type` 目前包含 `CAMPAIGN_COMPLETED`，用於合購完成後提醒雙方互評。
+- `notifications.type` 也會搭配 WebSocket 廣播事件使用，例如聊天室收到的 `CAMPAIGN_STATUS_CHANGED` payload。
+- 評價查詢會使用既有唯一鍵 `(campaign_id, reviewer_id, reviewee_id)` 判斷是否已評價。
 
 本文件依據 [`sql.sql`](c:/Users/HowardLu/IdeaProjects/ahui/costoco/backend/gb_backEnd/sql.sql) 整理目前 `gbc` schema 的資料表結構。
 

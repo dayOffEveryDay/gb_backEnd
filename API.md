@@ -1,47 +1,20 @@
-# API
+# API 文件
 
-## Implementation Notes
-
-### Host cancellation
-
-- `POST /api/v1/campaigns/{id}/cancel` currently cancels the campaign and joined participants.
-- This endpoint currently does not deduct host credit score.
-- This endpoint currently does not create a `CreditScoreLog`.
-
-### Credit log query
-
-- `GET /api/v1/campaigns/me/credit-logs` returns actual score deltas in `scoreChange`.
-- Example values include `+1`, `-3`, and `-10`.
-
-### Review status query
-
-- `GET /api/v1/reviews/check?campaignId={campaignId}&revieweeId={revieweeId}` returns whether the current user has already reviewed the target user in that campaign.
-- Response fields: `isReviewed`, `rating`, `comment`.
-
-### Campaign completion
-
-- When the last joined participant confirms receipt, the campaign becomes `COMPLETED` and `completed_at` is recorded.
-- The system then sends `CAMPAIGN_COMPLETED` notifications to the host and all `CONFIRMED` participants.
-
-### WebSocket chat access
-
-- STOMP subscribe to `/topic/campaigns/{campaignId}` now requires the current user to be the host or an allowed participant.
-- Closed rooms are blocked for `CANCELLED` campaigns.
-- `COMPLETED` campaigns keep chat access for 3 days after `completed_at`, then subscription is denied.
-
-本文件依據目前 `gb_backEnd` 程式碼整理，來源包含 `controller`、`dto`、`service`、`security` 與 `websocket` 設定。
+本文件整理 `gb_backEnd` 目前對外提供的 REST API 與 WebSocket/STOMP 使用方式。內容依據目前 controller 與 service 實作整理，若程式碼與文件有落差，請以程式碼為準。
 
 ## 基本資訊
 
 - Base Path: `/api/v1`
 - 預設 HTTP Port: `8080`
-- 圖片路徑: `/images/**`
+- 靜態圖片路徑: `/images/{fileName}`
 - WebSocket STOMP Endpoint: `/ws`
-- REST API 預設回傳 `application/json`
+- REST 預設 Content-Type: `application/json`
+- 建立合購含圖片上傳時使用 Content-Type: `multipart/form-data`
 
 ## 認證規則
 
-不需要 JWT 的 API：
+以下 API 不需要 JWT：
+
 - `POST /api/v1/auth/line`
 - `GET /api/v1/auth/dev-login`
 - `GET /api/v1/stores`
@@ -50,7 +23,13 @@
 - `/images/**`
 - `/ws/**`
 
-其餘 REST API 需要帶：
+其餘 REST API 預設需要在 Header 帶入 JWT：
+
+```http
+Authorization: Bearer <JWT_TOKEN>
+```
+
+STOMP `CONNECT` 也需要帶入：
 
 ```http
 Authorization: Bearer <JWT_TOKEN>
@@ -58,7 +37,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ## 錯誤格式
 
-業務錯誤與驗證錯誤會由 `GlobalExceptionHandler` 統一處理。
+全域錯誤由 `GlobalExceptionHandler` 統一處理，常見格式如下：
 
 ```json
 {
@@ -70,7 +49,31 @@ Authorization: Bearer <JWT_TOKEN>
 }
 ```
 
-驗證失敗時 `error` 可能為 `Validation Failed`。未預期錯誤時會回 `500 Internal Server Error`。
+## 常用狀態值
+
+`campaign.status`：
+
+- `OPEN`: 開放加入中
+- `FULL`: 已額滿
+- `DELIVERED`: 團主已宣告面交或交付，等待團員確認收貨
+- `COMPLETED`: 所有團員已確認收貨，合購完成
+- `CANCELLED`: 合購已取消
+- `HOST_NO_SHOW`: 團主逾時未交付，被系統判定放鳥
+- `FAILED`: 合購失敗或流局
+
+`participant.status`：
+
+- `JOINED`: 已加入
+- `CANCELLED`: 已取消
+- `KICKED`: 被團主踢除
+- `CONFIRMED`: 已確認收貨
+- `NO_SHOW`: 被標記未到場
+- `DISPUTED`: 已提出爭議
+
+`scenarioType`：
+
+- `INSTANT`: 即時合購
+- `SCHEDULED`: 預約合購
 
 ## 1. Auth API
 
@@ -92,6 +95,12 @@ Request Body:
 
 Response: `AuthResponse`
 
+說明：
+
+- 使用 LINE OAuth code 換取 LINE access token。
+- 取得 LINE profile 後，依 `lineUid` 建立或查詢使用者。
+- 回傳系統 JWT 給前端後續呼叫受保護 API 使用。
+
 ### 1.2 Dev Login
 
 - Path: `/api/v1/auth/dev-login`
@@ -99,6 +108,7 @@ Response: `AuthResponse`
 - Auth: 不需要
 
 Query Params:
+
 - `userId` `Long`, optional, default `1`
 
 Response:
@@ -111,6 +121,11 @@ Response:
 }
 ```
 
+說明：
+
+- 開發測試用登入 API。
+- 會依指定 `userId` 產生 JWT。
+
 ## 2. Reference Data API
 
 ### 2.1 取得門市清單
@@ -121,6 +136,10 @@ Response:
 
 Response: `List<StoreResponse>`
 
+說明：
+
+- 回傳目前系統內建或啟用的 Costco 門市資料。
+
 ### 2.2 取得分類清單
 
 - Path: `/api/v1/categories`
@@ -128,6 +147,10 @@ Response: `List<StoreResponse>`
 - Auth: 不需要
 
 Response: `List<CategoryResponse>`
+
+說明：
+
+- 回傳商品分類資料，供建立合購或篩選合購列表使用。
 
 ## 3. Campaign API
 
@@ -138,85 +161,68 @@ Response: `List<CategoryResponse>`
 - Auth: 不需要
 
 Query Params:
-- `storeId` `Integer`, optional
-- `categoryId` `Integer`, optional
-- `keyword` `String`, optional
+
+- `storeId` `Integer`, optional，依門市篩選
+- `categoryId` `Integer`, optional，依分類篩選
+- `keyword` `String`, optional，依關鍵字搜尋
 - `page` `int`, optional, default `0`
 - `size` `int`, optional, default `10`
 
 Response: `Page<CampaignSummaryResponse>`
 
 主要欄位：
-- `id`
-- `itemName`
-- `imageUrls`
-- `pricePerUnit`
-- `totalQuantity`
-- `availableQuantity`
-- `meetupLocation`
-- `meetupTime`
-- `expireTime`
-- `status`
-- `scenarioType`
-- `storeName`
-- `categoryName`
-- `host.id`
-- `host.displayName`
-- `host.profileImageUrl`
-- `host.creditScore`
 
-`scenarioType` 目前使用值：
-- `INSTANT`
-- `SCHEDULED`
-
-`campaign.status` 目前程式實際出現值：
-- `OPEN`
-- `FULL`
-- `DELIVERED`
-- `COMPLETED`
-- `CANCELLED`
-- `HOST_NO_SHOW`
-
-`participant.status` 目前程式實際出現值：
-- `JOINED`
-- `CANCELLED`
-- `KICKED`
-- `CONFIRMED`
-- `NO_SHOW`
-- `DISPUTED`
+- `id`: 合購 id
+- `itemName`: 商品名稱
+- `imageUrls`: 圖片路徑清單
+- `pricePerUnit`: 單位價格
+- `totalQuantity`: 合購總數量
+- `availableQuantity`: 剩餘可加入數量
+- `meetupLocation`: 面交地點
+- `meetupTime`: 面交時間
+- `expireTime`: 合購截止時間
+- `status`: 合購狀態
+- `scenarioType`: 合購類型
+- `storeName`: 門市名稱
+- `categoryName`: 分類名稱
+- `host.id`: 團主 id
+- `host.displayName`: 團主顯示名稱
+- `host.profileImageUrl`: 團主頭像
+- `host.creditScore`: 團主目前信用分數
 
 ### 3.2 建立開團
 
 - Path: `/api/v1/campaigns`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `multipart/form-data`
 
 Request Form Fields:
-- `storeId` `Integer`
-- `categoryId` `Integer`
-- `scenarioType` `String`
-- `itemName` `String`
-- `pricePerUnit` `Integer`
-- `productTotalQuantity` `Integer`
-- `openQuantity` `Integer`
-- `meetupLocation` `String`
-- `meetupTime` `LocalDateTime`
-- `expireTime` `LocalDateTime`
-- `images` `List<MultipartFile>`, optional, 最多 `3` 張
 
-程式行為：
-- 只有 `hasCostcoMembership = true` 的使用者可以開團
-- `openQuantity` 不可大於 `productTotalQuantity`
-- 系統會計算 `hostReservedQuantity = productTotalQuantity - openQuantity`
-- 實際存入 campaign 的 `totalQuantity` 為 `openQuantity`
-- 圖片會存到 `uploads/campaigns/`，並以 UUID 檔名保存
+- `storeId` `Integer`, required
+- `categoryId` `Integer`, required
+- `scenarioType` `String`, required，`INSTANT` 或 `SCHEDULED`
+- `itemName` `String`, required
+- `pricePerUnit` `Integer`, required
+- `productTotalQuantity` `Integer`, required
+- `openQuantity` `Integer`, required
+- `meetupLocation` `String`, required
+- `meetupTime` `LocalDateTime`, required
+- `expireTime` `LocalDateTime`, required
+- `images` `List<MultipartFile>`, optional，最多 `3` 張
+
+規則：
+
+- 開團者必須有 Costco 會員資格。
+- `openQuantity` 不可大於 `productTotalQuantity`。
+- 系統會計算 `hostReservedQuantity = productTotalQuantity - openQuantity`。
+- 圖片會存到 `uploads/campaigns/`，對外讀取路徑為 `/images/{fileName}`。
 
 ### 3.3 團主修改開放數量
 
 - Path: `/api/v1/campaigns/{id}/host-revise`
 - Method: `PUT`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
@@ -228,17 +234,18 @@ Request Body:
 }
 ```
 
-限制：
-- 只有團主可操作
-- 只允許 `OPEN`
-- `newOpenQuantity` 不可大於 `newProductTotalQuantity`
-- `newOpenQuantity` 不可小於目前已售數量
+規則：
+
+- 只有團主可以操作。
+- 合購狀態必須是 `OPEN`。
+- `newOpenQuantity` 不可大於 `newProductTotalQuantity`。
+- `newOpenQuantity` 不可低於目前已加入數量。
 
 ### 3.4 參加開團
 
 - Path: `/api/v1/campaigns/{id}/join`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
@@ -249,28 +256,31 @@ Request Body:
 }
 ```
 
-限制：
+規則：
+
 - `quantity >= 1`
-- 不可加入自己開的團
-- 只允許 `OPEN`
-- 超過 `expireTime` 不可加入
-- 庫存不足會失敗
+- 不可加入自己開的團。
+- 合購狀態必須是 `OPEN`。
+- 不可超過剩餘可加入數量。
+- 不可加入已過期合購。
 
 ### 3.5 團主開啟修改模式
 
 - Path: `/api/v1/campaigns/{id}/unlock`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 
-限制：
-- 只有團主可操作
-- 只允許 `FULL`
+規則：
+
+- 只有團主可以操作。
+- 合購狀態必須是 `FULL`。
+- 開啟後團員可在允許條件下修改數量。
 
 ### 3.6 團員減少數量
 
 - Path: `/api/v1/campaigns/{id}/revise`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
@@ -281,193 +291,220 @@ Request Body:
 }
 ```
 
-限制：
+規則：
+
+- 只能修改自己的 `JOINED` 參與紀錄。
 - `quantity > 0`
-- 需要有 `JOINED` 的參團紀錄
-- 只允許 campaign 狀態為 `OPEN`，或 `allowRevision = true`
-- 修改後個人數量不可小於 `1`
+- 合購狀態必須是 `OPEN`，或 `allowRevision = true`。
+- 減少後數量不可低於 `1`。
+- 若要完全退出，應使用退出 API。
 
 ### 3.7 退出開團
 
 - Path: `/api/v1/campaigns/{id}/withdraw`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 
-限制：
-- 需要有 `JOINED` 的參團紀錄
-- 只允許 campaign 狀態為 `OPEN`，或 `allowRevision = true`
-- 超過 `expireTime` 不可退出
+規則：
 
-### 3.8 kickParticipant: 團主踢除團員
+- 只能退出自己的 `JOINED` 參與紀錄。
+- 合購狀態必須是 `OPEN`，或 `allowRevision = true`。
+- 不可退出已過期合購。
+
+效果：
+
+- participant 狀態改為 `CANCELLED`。
+- 釋出原本加入的數量。
+- campaign 狀態會回到 `OPEN`。
+- 使用者 `participantCancelCount` 會加 `1`。
+- 團主會收到 `MEMBER_WITHDRAW` 通知。
+
+### 3.8 團主踢除團員
 
 - Path: `/api/v1/campaigns/{id}/participants/{participantId}/kick`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
 
 ```json
 {
-  "reason": "超過集合時間仍未回應"
+  "reason": "超過約定時間未回覆"
 }
 ```
 
-備註：
-- Controller method name 是 `kickParticipant`
-- Controller path 參數名稱叫 `participantId`，但實際傳入的是目標使用者 `userId`
-- `requestBody` 可省略；若有帶 body，controller 目前只讀取 `reason`
-- 若沒帶 `reason`，程式會使用預設字串
-- service 會把 `reason` 寫入 participant 的 `hostNote`
+規則：
 
-限制：
-- 只有團主可操作
-- 只允許 campaign 狀態為 `OPEN` 或 `FULL`
-- 若 campaign 已進入 `DELIVERED` 或 `CONFIRMED`，不可再踢人
-- 目標使用者必須有 `JOINED` 狀態的參團資料
+- 只有團主可以操作。
+- 合購狀態必須是 `OPEN` 或 `FULL`。
+- 不可在 `DELIVERED` 或 `CONFIRMED` 後踢除。
+- 目標使用者必須是 `JOINED` 團員。
 
-程式行為：
-- participant 狀態改為 `KICKED`
-- participant 的 `hostNote` 會保存團主填寫的原因
-- 釋出該團員數量回 `availableQuantity`
-- campaign 狀態改回 `OPEN`
-- `allowRevision` 重設為 `false`
-- 發送 `KICKED` 通知給被踢的使用者
+效果：
+
+- participant 狀態改為 `KICKED`。
+- participant `hostNote` 會記錄踢除原因。
+- 合購釋出該團員數量並改回 `OPEN`。
+- `allowRevision` 設為 `false`。
+- 發送 `KICKED` 通知。
 
 ### 3.9 團主宣告已面交
 
 - Path: `/api/v1/campaigns/{id}/deliver`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 
-限制：
-- 只有團主可操作
-- 只允許 `OPEN` 或 `FULL`
-- 至少要有一位 `JOINED` 成員
+規則：
+
+- 只有團主可以操作。
+- 合購狀態必須是 `OPEN` 或 `FULL`。
+- 至少需要一位 `JOINED` 團員。
+
+效果：
+
+- campaign 狀態改為 `DELIVERED`。
+- 系統會透過 WebSocket 廣播 `CAMPAIGN_STATUS_CHANGED` 到 `/topic/campaigns/{campaignId}`。
+- 廣播 payload 會包含 `type`、`campaignId`、`status`、`message`。
+
+WebSocket 廣播範例：
+
+```json
+{
+  "type": "CAMPAIGN_STATUS_CHANGED",
+  "campaignId": 123,
+  "status": "DELIVERED",
+  "message": "主揪已發起面交"
+}
+```
 
 ### 3.10 團員確認收貨
 
 - Path: `/api/v1/campaigns/{id}/confirm`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 
-限制：
-- campaign 必須是 `DELIVERED`
-- 呼叫者必須有該團的 participant 記錄
-- participant 狀態必須是 `JOINED`
+規則：
+
+- campaign 狀態必須是 `DELIVERED`。
+- 目前使用者必須有該合購的 participant。
+- participant 狀態必須是 `JOINED`。
+
+效果：
+
+- participant 狀態改為 `CONFIRMED`。
+- 如果已無剩餘 `JOINED` 團員，campaign 狀態改為 `COMPLETED`。
+- campaign 完成時寫入 `completedAt`。
+- campaign 完成時發送 `CAMPAIGN_COMPLETED` 通知給團主與所有 `CONFIRMED` 團員。
 
 ### 3.11 團主取消開團
 
 - Path: `/api/v1/campaigns/{id}/cancel`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 
-限制：
-- 只有團主可操作
-- 不允許已經是 `CANCELLED`、`COMPLETED`、`DELIVERED`
+規則：
 
-### 3.12 markNoShow: 團主標記團員未到場
+- 只有團主可以操作。
+- 不允許取消狀態為 `CANCELLED`、`COMPLETED`、`DELIVERED` 的合購。
+
+效果：
+
+- campaign 狀態改為 `CANCELLED`。
+- 如果已有 active `JOINED` 團員，這些 participant 會改為 `CANCELLED`。
+- 如果已有 active `JOINED` 團員，會呼叫 `CreditScoreService.recordScoreChange(...)` 寫入信用分紀錄。
+- 目前程式實際傳入 `scoreChange = 10`，原因為 `取消已有團員的合購單：「{itemName}」`。
+- 如果沒有 active `JOINED` 團員，不會寫入信用分紀錄。
+
+注意：
+
+- 目前 `scoreChange = 10` 代表程式實作是加分紀錄；如果產品規格是取消要扣分，程式應改為 `-10`。
+
+### 3.12 團主標記團員未到場
 
 - Path: `/api/v1/campaigns/{campaignId}/participants/{userId}/no-show`
 - Method: `PUT`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
 
 ```json
 {
-  "note": "現場等 20 分鐘仍未出現"
+  "note": "超過 20 分鐘未到場"
 }
 ```
 
-備註：
-- `{userId}` 是團員的使用者 ID，不是 participant table 的 primary key
-- Controller method name 是 `markNoShow`
-- `requestBody` 可省略；若有帶 body，controller 目前只讀取 `note`
-- `note` 會傳給 service，並寫入 participant 的 `hostNote`
+規則：
 
-限制：
-- 只有團主可操作
-- 目標使用者必須是該團 participant
-- 目標 participant 狀態必須是 `JOINED` 或 `COMPLETED`
+- 只有團主可以操作。
+- `{userId}` 是使用者 id，不是 participant id。
+- 目標 participant 狀態必須是 `JOINED` 或 `COMPLETED`。
+- `note` 會記錄到 participant `hostNote`。
 
-### 3.13 raiseDispute: 團員提出爭議
+### 3.13 團員提出爭議
 
 - Path: `/api/v1/campaigns/{campaignId}/dispute`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
 
 ```json
 {
-  "reason": "我有到場，團主標記錯誤"
+  "reason": "我有到場，但團主誤標未到場"
 }
 ```
 
-備註：
-- Controller method name 是 `raiseDispute`
-- `reason` 目前 controller 直接用 `Map<String, String>` 接，不是獨立 DTO
-- Controller 標成 `required = false`，但目前實作仍直接讀 `requestBody.getOrDefault(...)`
-- 實務上請視為 request body 必填，否則可能發生錯誤
-- service 會把 `reason` 寫入 participant 的 `disputeReason`
+規則：
 
-限制：
-- 呼叫者必須是該團 participant
-- participant 狀態必須是 `JOINED` 或 `NO_SHOW`
+- 目前使用者必須有該 campaign 的 participant。
+- participant 狀態必須是 `JOINED` 或 `NO_SHOW`。
+- `reason` optional，未提供時 service 會補預設原因。
 
-### 3.14 查詢我的信用紀錄
+效果：
+
+- participant `disputeReason` 記錄爭議原因。
+- 發送 `DISPUTE_RAISED` 通知給團主。
+
+### 3.14 查詢我的信用紀錄（舊路徑，已停用）
 
 - Path: `/api/v1/campaigns/me/credit-logs`
 - Method: `GET`
-- Auth: 需要 JWT
+- Status: 目前 controller 已註解停用
 
-Response: `Page<CreditLogResponse>`
+說明：
+
+- 舊 DTO `CreditLogResponse` 已標記 `@Deprecated`。
+- 前端請改用新版 `/api/v1/credit-scores/me/logs`。
 
 ### 3.15 查詢我開的團
 
 - Path: `/api/v1/campaigns/my-hosted`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
+
+Query Params:
+
+- Spring `Pageable` 支援的 `page`、`size`、`sort`
 
 Response: `Page<CampaignSummaryResponse>`
-
-查詢參數：
-- `page`, `size`, `sort` 由 Spring `Pageable` 支援
-
-返回的 `status` 為 campaign 狀態，可能值：
-- `OPEN`
-- `FULL`
-- `DELIVERED`
-- `COMPLETED`
-- `CANCELLED`
-- `HOST_NO_SHOW`
-- `FAILED`
 
 ### 3.16 查詢我參加的團
 
 - Path: `/api/v1/campaigns/my-joined`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
+
+Query Params:
+
+- Spring `Pageable` 支援的 `page`、`size`、`sort`
 
 Response: `Page<CampaignSummaryResponse>`
 
-查詢參數：
-- `page`, `size`, `sort` 由 Spring `Pageable` 支援
+目前會納入的 participant 狀態：
 
-返回的 `status` 為 campaign 狀態，可能值：
-- `OPEN`
-- `FULL`
-- `DELIVERED`
-- `COMPLETED`
-- `CANCELLED`
-- `HOST_NO_SHOW`
-- `FAILED`
-
-補充：
-- `/my-joined` 會先依 participant 狀態過濾資料，目前納入查詢的 participant 狀態為：
 - `JOINED`
 - `COMPLETED`
 - `DISPUTED`
@@ -478,7 +515,7 @@ Response: `Page<CampaignSummaryResponse>`
 
 - Path: `/api/v1/campaigns/{id}/host-dashboard`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 Response: `HostDashboardResponse`
 
@@ -486,7 +523,7 @@ Response: `HostDashboardResponse`
 
 - Path: `/api/v1/campaigns/{id}/participants/me`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 Response: `MyParticipationResponse`
 
@@ -496,7 +533,7 @@ Response: `MyParticipationResponse`
 
 - Path: `/api/v1/users/me`
 - Method: `PUT`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
@@ -512,78 +549,52 @@ Request Body:
 
 - Path: `/api/v1/users/{id}/block`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 ### 4.3 解除封鎖使用者
 
 - Path: `/api/v1/users/{id}/block`
 - Method: `DELETE`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 ### 4.4 查詢我的封鎖清單
 
 - Path: `/api/v1/users/me/blocks`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 Query Params:
+
 - `page` `int`, optional, default `0`
 - `size` `int`, optional, default `10`
 
 Response: `Page<BlockedUserResponse>`
 
 欄位：
-- `userId`
-- `displayName`
-- `avatarUrl`
-- `blockedAt`
+
+- `userId`: 被封鎖使用者 id
+- `displayName`: 顯示名稱
+- `avatarUrl`: 頭像
+- `blockedAt`: 封鎖時間
 
 ### 4.5 取得使用者個人頁
 
 - Path: `/api/v1/users/{id}/profile`
 - Method: `GET`
-- Auth: 需要 JWT
-
-備註：
-- Controller 內部支援 `currentUserId = null` 的情況，但目前 `SecurityConfig` 沒有將此路徑設為 `permitAll`，所以實際上仍需要 JWT
-- 若雙方存在 block 關係，service 會拒絕查詢
+- Auth: JWT required
 
 Response: `UserProfileResponse`
 
-主要欄位：
-- `userId`
-- `displayName`
-- `avatarUrl`
-- `creditScore`
-- `totalHostedCount`
-- `totalJoinedCount`
-- `joinDate`
-- `activeCampaigns`
+欄位：
 
-這支 API 會取得：
-- 使用者基本資料：`userId`、`displayName`、`avatarUrl`
-- 使用者統計資料：`creditScore`、`totalHostedCount`、`totalJoinedCount`
-- 使用者註冊時間：`joinDate`
-- 該使用者目前仍在進行中的開團清單：`activeCampaigns`
-
-`activeCampaigns` 內容為 `List<CampaignSummaryResponse>`，每筆會包含：
-- `id`
-- `itemName`
-- `imageUrls`
-- `pricePerUnit`
-- `totalQuantity`
-- `availableQuantity`
-- `meetupLocation`
-- `meetupTime`
-- `expireTime`
-- `status`
-- `scenarioType`
-- `storeName`
-- `categoryName`
-- `host`
-
-補充：
-- `activeCampaigns` 是以該使用者作為團主的進行中開團，repository 目前查的是 `status IN ('OPEN', 'FULL')`
+- `userId`: 使用者 id
+- `displayName`: 顯示名稱
+- `avatarUrl`: 頭像
+- `creditScore`: 目前信用分
+- `totalHostedCount`: 開團總數
+- `totalJoinedCount`: 參團總數
+- `joinDate`: 加入時間
+- `activeCampaigns`: 使用者目前進行中的合購清單
 
 ## 5. Follow API
 
@@ -591,17 +602,7 @@ Response: `UserProfileResponse`
 
 - Path: `/api/v1/follows/{hostId}`
 - Method: `POST`
-- Auth: 需要 JWT
-
-如何使用：
-- `hostId` 帶要追蹤的團主 user id
-- Header 帶 `Authorization: Bearer <JWT_TOKEN>`
-- body 不需要
-
-限制：
-- 不能追蹤自己
-- 已經追蹤過會報錯
-- 若雙方任一方封鎖對方，不能追蹤
+- Auth: JWT required
 
 Response:
 
@@ -616,12 +617,7 @@ Response:
 
 - Path: `/api/v1/follows/{hostId}`
 - Method: `DELETE`
-- Auth: 需要 JWT
-
-如何使用：
-- `hostId` 帶要取消追蹤的團主 user id
-- Header 帶 `Authorization: Bearer <JWT_TOKEN>`
-- body 不需要
+- Auth: JWT required
 
 Response:
 
@@ -636,23 +632,21 @@ Response:
 
 - Path: `/api/v1/follows/me`
 - Method: `GET`
-- Auth: 需要 JWT
-
-如何使用：
-- Header 帶 `Authorization: Bearer <JWT_TOKEN>`
-- 可用 `page`、`size` 分頁
+- Auth: JWT required
 
 Query Params:
+
 - `page` `int`, optional, default `0`
 - `size` `int`, optional, default `10`
 
 Response: `Page<FollowingUserResponse>`
 
 欄位：
-- `hostId`
-- `displayName`
-- `avatarUrl`
-- `followedAt`
+
+- `hostId`: 被追蹤團主 id
+- `displayName`: 團主顯示名稱
+- `avatarUrl`: 團主頭像
+- `followedAt`: 追蹤時間
 
 ## 6. Review API
 
@@ -660,7 +654,7 @@ Response: `Page<FollowingUserResponse>`
 
 - Path: `/api/v1/reviews`
 - Method: `POST`
-- Auth: 需要 JWT
+- Auth: JWT required
 - Content-Type: `application/json`
 
 Request Body:
@@ -670,7 +664,101 @@ Request Body:
   "campaignId": 1,
   "revieweeId": 2,
   "rating": 5,
-  "comment": "很準時"
+  "comment": "交易順利"
+}
+```
+
+規則：
+
+- 不可評價自己。
+- `rating` 必須介於 `1` 到 `5`。
+- 同一個 campaign、reviewer、reviewee 不可重複評價。
+- `rating = 5` 目前加 `+1`。
+- `rating = 1` 目前扣 `-3`。
+- `rating = 2 ~ 4` 不調整信用分。
+- 7 天內同 reviewer 對同 reviewee 的有效加分會被防刷限制。
+
+### 6.2 查詢評價狀態
+
+- Path: `/api/v1/reviews/check`
+- Method: `GET`
+- Auth: JWT required
+
+Query Params:
+
+- `campaignId` `Long`, required
+- `revieweeId` `Long`, required
+
+Response: `ReviewStatusResponse`
+
+欄位：
+
+- `isReviewed`: 是否已評價
+- `rating`: 若已評價，回傳評分；未評價時為 `null`
+- `comment`: 若已評價，回傳評語；未評價時為 `null`
+
+### 6.3 查詢我收到的評價
+
+- Path: `/api/v1/reviews/me/received`
+- Method: `GET`
+- Auth: JWT required
+
+Query Params:
+
+- `page` `int`, optional, default `0`
+- `size` `int`, optional, default `10`
+- `sort` Spring Pageable 支援的排序參數，optional
+
+Response: `Page<ReviewResponse>`
+
+用途：
+
+- 查詢「目前登入使用者」作為被評價者時，收到的所有評價紀錄。
+- 適合用在個人頁、信用頁、評價列表頁。
+- 後端會從 JWT 取得目前登入者 id，不需要前端傳 `revieweeId`。
+- 結果依 `createdAt desc` 排序，也就是最新收到的評價在最前面。
+
+Response 欄位：
+
+- `id`: 評價紀錄 id
+- `campaignId`: 關聯合購 id
+- `campaignName`: 關聯合購商品名稱
+- `reviewerId`: 評價者 id
+- `reviewerName`: 評價者顯示名稱
+- `rating`: 評分，範圍 `1 ~ 5`
+- `comment`: 評語內容
+- `isScoreCounted`: 這筆評價是否已納入信用分計算
+- `createdAt`: 評價建立時間
+
+Response 範例：
+
+```json
+{
+  "content": [
+    {
+      "id": 10,
+      "campaignId": 123,
+      "campaignName": "Costco 牛肉分購",
+      "reviewerId": 5,
+      "reviewerName": "A Hui",
+      "rating": 5,
+      "comment": "交易順利，準時面交",
+      "isScoreCounted": true,
+      "createdAt": "2026-04-14T20:30:00"
+    }
+  ],
+  "pageable": {
+    "pageNumber": 0,
+    "pageSize": 10
+  },
+  "totalElements": 1,
+  "totalPages": 1,
+  "last": true,
+  "first": true,
+  "number": 0,
+  "size": 10,
+  "numberOfElements": 1,
+  "empty": false
 }
 ```
 
@@ -680,53 +768,128 @@ Request Body:
 
 - Path: `/api/v1/notifications/unread`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 Response: `List<NotificationResponse>`
+
+說明：
+
+- 回傳目前使用者尚未讀取的通知。
+- 依建立時間新到舊排序。
 
 ### 7.2 標記通知已讀
 
 - Path: `/api/v1/notifications/{id}/read`
 - Method: `PUT`
-- Auth: 需要 JWT
+- Auth: JWT required
 
-目前程式內實際使用到的通知類型：
-- `CAMPAIGN_FULL`
-- `CAMPAIGN_CANCELLED`
-- `MEMBER_WITHDRAW`
-- `KICKED`
-- `NO_SHOW_WARNING`
-- `DISPUTE_RAISED`
+Response:
 
-## 8. Chat API
+```json
+{
+  "success": true,
+  "message": "已標記為已讀"
+}
+```
 
-### 8.1 取得聊天室歷史訊息
+說明：
+
+- 只能標記自己的通知。
+- 標記後該通知會從未讀清單移除。
+
+### 7.3 查詢已讀通知
+
+- Path: `/api/v1/notifications/read`
+- Method: `GET`
+- Auth: JWT required
+
+Query Params:
+
+- Spring `Pageable` 支援的 `page`、`size`、`sort`
+- controller 預設 `size = 20`
+
+Response: `Page<NotificationResponse>`
+
+說明：
+
+- 回傳目前使用者已讀通知。
+- 依建立時間新到舊排序。
+- 適合前端通知中心查詢歷史通知紀錄。
+
+目前使用中的通知類型：
+
+- `CAMPAIGN_FULL`: 合購滿單
+- `CAMPAIGN_CANCELLED`: 合購取消
+- `CAMPAIGN_COMPLETED`: 合購完成，可開始互評
+- `MEMBER_WITHDRAW`: 團員退出
+- `KICKED`: 團員被踢除
+- `NO_SHOW_WARNING`: 團員被標記未到場警告
+- `DISPUTE_RAISED`: 團員提出爭議
+
+## 8. Credit Score API
+
+### 8.1 查詢我的信用分異動紀錄
+
+- Path: `/api/v1/credit-scores/me/logs`
+- Method: `GET`
+- Auth: JWT required
+
+Query Params:
+
+- `page` `int`, optional, default `0`
+- `size` `int`, optional, default `10`
+
+Response: `Page<CreditScoreLogResponse>`
+
+欄位：
+
+- `id`: 信用分紀錄 id
+- `scoreChange`: 本次分數異動值，例如 `+1`、`-3`、`-10`
+- `reason`: 異動原因
+- `campaignId`: 關聯合購 id，前端可用於跳轉
+- `createdAt`: 紀錄建立時間
+
+說明：
+
+- 依 `createdAt desc` 排序。
+- 讀取資料表 `credit_score_logs`。
+- `CreditLogResponse` 已標記 deprecated，前端請改用 `CreditScoreLogResponse`。
+
+## 9. Chat REST API
+
+### 9.1 取得聊天室歷史訊息
 
 - Path: `/api/v1/campaigns/{campaignId}/chat-messages`
 - Method: `GET`
-- Auth: 需要 JWT
+- Auth: JWT required
 
 Response: `List<ChatMessageResponse>`
 
-## 9. WebSocket / STOMP
+說明：
 
-### 9.1 連線資訊
+- 查詢指定合購聊天室歷史訊息。
+- WebSocket 即時訊息仍由 STOMP channel 傳送。
+
+## 10. WebSocket / STOMP
+
+### 10.1 連線資訊
 
 - Endpoint: `/ws`
-- 支援 SockJS
+- SockJS: supported
 - Application Destination Prefix: `/app`
 - Broker Prefix: `/topic`, `/queue`
 - User Destination Prefix: `/user`
 
-STOMP `CONNECT` header 需要帶：
+STOMP `CONNECT` header:
 
 ```http
 Authorization: Bearer <JWT_TOKEN>
 ```
 
-### 9.2 發送聊天室訊息
+### 10.2 發送聊天室訊息
 
 - Client Send To: `/app/chat/{campaignId}/sendMessage`
+- Server Broadcast To: `/topic/campaigns/{campaignId}`
 
 Payload:
 
@@ -736,10 +899,14 @@ Payload:
 }
 ```
 
-Server 會儲存訊息後，廣播到：
-- `/topic/campaigns/{campaignId}`
+聊天室訂閱規則：
 
-### 9.3 接收個人通知
+- 訂閱 `/topic/campaigns/{campaignId}` 時，必須是該 campaign 的團主，或是允許狀態中的參與者。
+- 允許參與者狀態包含 `JOINED`、`CONFIRMED`、`DISPUTED`、`NO_SHOW`。
+- `CANCELLED` campaign 不允許訂閱。
+- `COMPLETED` campaign 在 `completedAt` 後保留 3 天聊天室權限，超過後不允許訂閱。
+
+### 10.3 接收個人通知
 
 - Subscribe: `/user/queue/notifications`
 
@@ -747,8 +914,28 @@ Payload:
 
 ```json
 {
-  "content": "通知內容",
+  "content": "notification content",
   "type": "CAMPAIGN_FULL",
   "referenceId": 123
 }
 ```
+
+### 10.4 接收合購狀態變更廣播
+
+- Subscribe: `/topic/campaigns/{campaignId}`
+
+Payload:
+
+```json
+{
+  "type": "CAMPAIGN_STATUS_CHANGED",
+  "campaignId": 123,
+  "status": "DELIVERED",
+  "message": "主揪已發起面交"
+}
+```
+
+說明：
+
+- 目前團主呼叫 `POST /api/v1/campaigns/{id}/deliver` 時，會廣播此事件。
+- 前端可用此事件即時更新聊天室內的合購狀態提示。

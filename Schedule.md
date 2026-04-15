@@ -1,10 +1,11 @@
 # Schedule.md
 
-## Implementation Notes
+## 最新排程備註
 
-- `huntGhostedCampaigns` handles the scheduled `HOST_NO_SHOW` case only.
-- In that flow, the host loses `10` credit points and one `CreditScoreLog` is created.
-- Host manual campaign cancellation is not part of this deduction flow and currently does not deduct credit score.
+- `huntGhostedCampaigns` 只處理排程判定的 `HOST_NO_SHOW` 團主放鳥情境。
+- 在 `HOST_NO_SHOW` 流程中，團主信用分會扣 `10` 分，並寫入一筆 `CreditScoreLog(scoreChange = -10)`。
+- 團主「主動取消合購」不是排程處理範圍；目前由 `CampaignService.cancelCampaignByHost(...)` 處理。
+- 團主主動取消且已有 active `JOINED` 團員時，目前程式會呼叫 `CreditScoreService.recordScoreChange(...)` 寫入信用分紀錄。
 
 本文件整理目前專案已實作的排程工作，內容以 `CampaignScheduler` 與其對應 service/repository 行為為準。
 

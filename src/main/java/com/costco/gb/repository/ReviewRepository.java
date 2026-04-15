@@ -1,6 +1,8 @@
 package com.costco.gb.repository;
 
 import com.costco.gb.entity.Review;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -17,6 +19,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     boolean existsByReviewerIdAndRevieweeIdAndIsScoreCountedTrueAndCreatedAtAfter(
             Long reviewerId, Long revieweeId, LocalDateTime sevenDaysAgo);
 
-    // 在 ReviewRepository.java 裡面：
+
     Optional<Review> findByCampaignIdAndReviewerIdAndRevieweeId(Long campaignId, Long reviewerId, Long revieweeId);
+
+    // 🌟 撈出別人給我的評價，依時間倒序
+    Page<Review> findByRevieweeIdOrderByCreatedAtDesc(Long revieweeId, Pageable pageable);
 }

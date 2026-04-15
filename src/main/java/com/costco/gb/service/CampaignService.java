@@ -43,6 +43,7 @@ public class CampaignService {
     private final CreditScoreLogRepository creditScoreLogRepository;
     private final NotificationService notificationService;
     private final CampaignMapper campaignMapper;
+    private final CreditScoreService creditScoreService;
 
 
     // 🌟 注入 YML 裡的 base-url 參數
@@ -598,7 +599,12 @@ public class CampaignService {
         campaignRepository.save(campaign);
         log.info("團主 {} 已將合購單 {} 狀態更改為 DELIVERED (待團員確認收貨)", userId, campaignId);
 
-        // TODO: 未來可在此推播通知所有團員「團主已發貨/面交，請記得點擊確認收貨」
+        //  🌟 觸發 WebSocket 廣播事件到聊天室
+        notificationService.broadcastCampaignStatus(
+                campaignId,
+                "DELIVERED",
+                "主揪已發起面交"
+        );
     }
 
     // ==========================================
@@ -709,7 +715,7 @@ public class CampaignService {
             campaign.setCancelReason("團主主動取消 (已有團員上車)");
 
             // (假設你的 userService 有這支 API，未來可以補上扣分)
-            // userService.deductCreditScore(hostId, 10, "取消已有團員的合購單：「" + campaign.getItemName() + "」");
+            creditScoreService.recordScoreChange (hostId, 10, "取消已有團員的合購單：「" + campaign.getItemName() + "」" ,campaignId);
 
             // 2. 將所有無辜團員「強制踢下車」
             for (Participant p : activeParticipants) {

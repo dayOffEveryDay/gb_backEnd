@@ -1,35 +1,40 @@
 # Function.md
 
-## Implementation Notes
+## 最新功能備註
 
-### Host manual cancellation
+### 信用分紀錄
 
-- `cancelCampaignByHost(...)` currently updates campaign and participant status only.
-- It currently does not deduct host credit score.
-- It currently does not write a `CreditScoreLog`.
+- 新增 `CreditScoreController`，提供 `GET /api/v1/credit-scores/me/logs` 查詢我的信用分異動紀錄。
+- 新增 `CreditScoreService`，集中處理信用分查詢與系統內部信用分異動記帳。
+- `CreditScoreLogResponse` 為新版信用分紀錄 DTO，欄位包含 `id`、`scoreChange`、`reason`、`campaignId`、`createdAt`。
+- 舊版 `CreditLogResponse` 已標記為 `@Deprecated`，舊路徑 `/api/v1/campaigns/me/credit-logs` 目前已從 controller 註解停用。
 
-### Credit score logs
+### 團主取消合購
 
-- `CreditScoreLog.scoreChange` records the exact delta for each score change.
-- Score deduction for host no-show is `-10`.
+- `cancelCampaignByHost(...)` 目前會取消合購單本體。
+- 若該合購已有 active `JOINED` 團員，會把團員狀態改為 `CANCELLED`。
+- 若該合購已有 active `JOINED` 團員，會呼叫 `CreditScoreService.recordScoreChange(...)` 寫入信用分紀錄。
+- 目前程式傳入的 `scoreChange` 是 `10`。若產品規格是取消要扣分，這裡應改成 `-10`。
 
-### Review status query
+### 評價功能
 
-- `ReviewController` now exposes `GET /api/v1/reviews/check`.
-- `ReviewService.checkReviewStatus(...)` returns whether the current user already reviewed the target user for the given campaign.
-- `ReviewStatusResponse` includes `isReviewed`, `rating`, and `comment`.
+- `ReviewController` 提供 `GET /api/v1/reviews/check`，查詢目前使用者是否已對指定對象評價。
+- `ReviewController` 提供 `GET /api/v1/reviews/me/received`，查詢目前登入者收到的評價。
+- `ReviewResponse` 回傳收到評價的詳細資料，包含合購名稱、評價者、評分、評語、是否計入信用分與建立時間。
 
-### Campaign completion workflow
+### 通知功能
 
-- `Campaign.completedAt` is set when all joined participants confirm receipt.
-- `confirmReceipt(...)` now triggers `notificationService.notifyReviewTime(campaign)` after the campaign becomes `COMPLETED`.
-- `notifyReviewTime(...)` sends `CAMPAIGN_COMPLETED` notifications to the host and all confirmed participants.
+- `NotificationController` 提供 `GET /api/v1/notifications/read`，分頁查詢已讀通知。
+- `NotificationService.getReadNotifications(...)` 會依 `createdAt desc` 回傳目前使用者已讀通知。
+- `NotificationService.broadcastCampaignStatus(...)` 可廣播合購狀態變更事件到 `/topic/campaigns/{campaignId}`。
 
-### WebSocket room guard
+### 合購完成與聊天室
 
-- `ChatRoomInterceptor` is registered on the STOMP inbound channel after JWT authentication.
-- Subscription is allowed only for the host or participants in allowed statuses.
-- Completed campaign chat remains accessible for 3 days after `completedAt`.
+- `Campaign.completedAt` 會在所有團員確認收貨後寫入。
+- `confirmReceipt(...)` 會在合購變成 `COMPLETED` 後觸發 `notificationService.notifyReviewTime(campaign)`。
+- 團主宣告已面交 `deliverCampaign(...)` 會廣播 `CAMPAIGN_STATUS_CHANGED` 給聊天室訂閱者。
+- `ChatRoomInterceptor` 已接到 STOMP inbound channel，聊天室訂閱會檢查使用者是否為團主或有效參與者。
+- `COMPLETED` 合購的聊天室會在 `completedAt` 後保留 3 天可訂閱權限。
 
 本文件整理目前專案 `gb_backEnd` 主要 service / WebSocket / 新增功能邏輯，內容以 `src/main/java/com/costco/gb` 實際程式碼為準，並補上這次工作區尚未提交的聊天與通知功能。
 

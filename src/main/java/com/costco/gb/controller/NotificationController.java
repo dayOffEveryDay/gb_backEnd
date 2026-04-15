@@ -3,9 +3,12 @@ package com.costco.gb.controller;
 import com.costco.gb.dto.response.NotificationResponse;
 import com.costco.gb.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.domain.Pageable; // ✅ 正確的 Spring 分頁import java.util.List;
 
 import java.util.List;
 import java.util.Map;
@@ -40,5 +43,19 @@ public class NotificationController {
                 "success", true,
                 "message", "已標記為已讀"
         ));
+    }
+
+
+    // 🌟  3.獲取我的「已讀」通知紀錄
+    @GetMapping("/read")
+    public ResponseEntity<Page<NotificationResponse>> getReadNotifications(
+            @PageableDefault(size = 20) Pageable pageable) {
+
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        Page<NotificationResponse> readPage = notificationService.getReadNotifications(currentUserId, pageable);
+
+        return ResponseEntity.ok(readPage);
     }
 }

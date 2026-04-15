@@ -1,11 +1,14 @@
 # gb_backEnd
 
-## Latest Updates
+## 最新更新
 
-- Added review status query support so the client can check whether the current user has already reviewed a target user in a campaign.
-- Campaigns now record `completed_at` when all joined participants confirm receipt.
-- When a campaign becomes `COMPLETED`, the system sends review reminder notifications to the host and confirmed participants.
-- WebSocket chat subscription now validates room access and blocks expired/completed chat rooms after the grace period.
+- 新增新版信用分紀錄 API：`GET /api/v1/credit-scores/me/logs`。
+- 舊版信用分 DTO `CreditLogResponse` 已標記 deprecated，前端應改用 `CreditScoreLogResponse`。
+- 新增查詢收到的評價 API：`GET /api/v1/reviews/me/received`。
+- 新增查詢已讀通知 API：`GET /api/v1/notifications/read`。
+- 團主宣告已面交時，系統會透過 WebSocket 廣播 `CAMPAIGN_STATUS_CHANGED` 到合購聊天室。
+- 合購完成時會寫入 `completed_at`，並通知團主與已確認收貨的團員可以互相評價。
+- WebSocket 聊天室訂閱會檢查使用者是否為團主或有效參與者，完成後保留 3 天聊天室權限。
 
 Costco 團購平台後端專案，使用 Spring Boot 提供 REST API、JWT 驗證、WebSocket 即時聊天室與通知推播。
 

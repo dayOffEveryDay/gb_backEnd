@@ -1,6 +1,7 @@
 package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateReviewRequest;
+import com.costco.gb.dto.response.ReviewResponse;
 import com.costco.gb.dto.response.ReviewStatusResponse;
 import com.costco.gb.entity.Campaign;
 import com.costco.gb.entity.CreditScoreLog;
@@ -12,6 +13,8 @@ import com.costco.gb.repository.ReviewRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -131,6 +134,25 @@ public class ReviewService {
                         .isReviewed(false)
                         .build()
                 );
+    }
+
+    // 🌟 獲取「別人給我的」評價紀錄看板
+    @Transactional(readOnly = true)
+    public Page<ReviewResponse> getMyReceivedReviews(Long revieweeId, Pageable pageable) {
+
+        Page<Review> reviews = reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(revieweeId, pageable);
+
+        return reviews.map(review -> ReviewResponse.builder()
+                .id(review.getId())
+                .campaignId(review.getCampaign().getId())
+                .campaignName(review.getCampaign().getItemName()) // 假設 Campaign 有這個屬性
+                .reviewerId(review.getReviewer().getId())
+                .reviewerName(review.getReviewer().getDisplayName())     // 假設 User 有 name 或 nickname 屬性
+                .rating(review.getRating())
+                .comment(review.getComment())
+                .isScoreCounted(review.getIsScoreCounted())       // 🌟 把防刷單的結果傳給前端
+                .createdAt(review.getCreatedAt())
+                .build());
     }
 
 }

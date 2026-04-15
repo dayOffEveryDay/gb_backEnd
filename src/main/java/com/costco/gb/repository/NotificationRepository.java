@@ -20,5 +20,8 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     // 系統排程用：刪除過期超過 7 天的通知
     void deleteByExpireTimeBefore(LocalDateTime cutoffDate);
 
+    // 🌟 使用 Pageable 進行分頁，已讀訊息
+    Page<Notification> findByUserIdAndIsReadTrueOrderByCreatedAtDesc(Long userId, Pageable pageable);
+
     List<Notification> findByUserIdAndIsReadFalseOrderByCreatedAtDesc(Long userId);
 }

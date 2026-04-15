@@ -5,10 +5,12 @@ import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.Pageable; // ✅ 正確的 Spring 分頁
 import java.util.List;
 import java.util.Map;
 @Slf4j
@@ -125,7 +127,20 @@ public class NotificationService {
         notification.setIsRead(true);
         notificationRepository.save(notification);
     }
+    // 🌟 取得分頁後的「已讀」通知
+    @Transactional(readOnly = true)
+    public Page<NotificationResponse> getReadNotifications(Long userId, Pageable pageable) {
+        Page<Notification> readPage = notificationRepository
+                .findByUserIdAndIsReadTrueOrderByCreatedAtDesc(userId, pageable);
 
+        return readPage.map(n -> NotificationResponse.builder()
+                .id(n.getId())
+                .type(n.getType())
+                .referenceId(n.getReferenceId())
+                .content(n.getContent())
+                .createdAt(n.getCreatedAt())
+                .build());
+    }
 
     // 🌟 專屬：警告團員被標記棄單，提醒他可以申訴！
     @Transactional
@@ -147,5 +162,21 @@ public class NotificationService {
         log.info("已發送仲裁通知給團主 {}", campaign.getHost().getId());
     }
 
+    // 🌟 新增：對特定合購單的聊天室廣播狀態變更事件
+    public void broadcastCampaignStatus(Long campaignId, String status, String message) {
+        // 依照你定義的 Payload 結構建立 Map
+        Map<String, Object> payload = Map.of(
+                "type", "CAMPAIGN_STATUS_CHANGED",
+                "campaignId", campaignId,
+                "status", status,
+                "message", message
+        );
+
+        // 廣播到該合購單的專屬 Topic (所有訂閱此頻道的連線都會收到)
+        String destination = "/topic/campaigns/" + campaignId;
+        messagingTemplate.convertAndSend(destination, payload);
+
+        log.info("已向聊天室 {} 廣播狀態變更: {}", campaignId, status);
+    }
 
 }

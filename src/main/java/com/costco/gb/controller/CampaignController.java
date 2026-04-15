@@ -3,7 +3,7 @@ package com.costco.gb.controller;
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.request.ReviseHostQuantityRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
-import com.costco.gb.dto.response.CreditLogResponse;
+//import com.costco.gb.dto.response.CreditLogResponse;
 import com.costco.gb.dto.response.HostDashboardResponse;
 import com.costco.gb.service.CampaignService;
 import com.costco.gb.service.UserService;
@@ -181,6 +181,7 @@ public class CampaignController {
     // 團主宣告已面交
     @PostMapping("/{id}/deliver")
     public ResponseEntity<?> deliverCampaign(@PathVariable("id") Long campaignId) {
+
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long userId = Long.parseLong(userIdStr);
 
@@ -220,18 +221,18 @@ public class CampaignController {
     }
 
     // 🌟 查詢個人信用分明細 (信用存摺)
-    @GetMapping("/me/credit-logs")
-    public ResponseEntity<Page<CreditLogResponse>> getMyCreditLogs(
-            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
-
-        // ✨ 一樣的做法
-        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Long userId = Long.parseLong(userIdStr);
-
-        Page<CreditLogResponse> response = userService.getMyCreditLogs(userId, pageable);
-
-        return ResponseEntity.ok(response);
-    }
+//    @GetMapping("/me/credit-logs")
+//    public ResponseEntity<Page<CreditLogResponse>> getMyCreditLogs(
+//            @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
+//
+//        // ✨ 一樣的做法
+//        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+//        Long userId = Long.parseLong(userIdStr);
+//
+//        Page<CreditLogResponse> response = userService.getMyCreditLogs(userId, pageable);
+//
+//        return ResponseEntity.ok(response);
+//    }
     // 🌟 取得「我開的團」列表
     @GetMapping("/my-hosted")
     public ResponseEntity<Page<CampaignSummaryResponse>> getMyHostedCampaigns(
