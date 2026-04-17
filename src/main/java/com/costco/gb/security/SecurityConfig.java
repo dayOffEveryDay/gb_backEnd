@@ -43,7 +43,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/dev-login").permitAll()
 
                         // 2. 【完全公開的 API】 (免登入即可存取)
-                        .requestMatchers("/api/v1/auth/line", "/images/**").permitAll() // Line 登入
+                        .requestMatchers("/api/v1/auth/line", "/images/**","/login/callback").permitAll() // Line 登入
                         .requestMatchers(HttpMethod.GET, "/api/v1/stores").permitAll() // 門市列表
                         .requestMatchers(HttpMethod.GET, "/api/v1/categories").permitAll() // 分類列表
                         .requestMatchers("/uploads/**", "/images/**").permitAll() // 🌟 把 /images/** 也加進去
