@@ -2,11 +2,8 @@ spring:
   application:
     name: gb-backend
 
-  datasource:
-    url: jdbc:mysql://localhost:3306/gbc?useSSL=false&serverTimezone=Asia/Taipei&allowPublicKeyRetrieval=true
-    username: ${DB_USERNAME:root}
-    password: ${GBC_DB_PASSWORD:password}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+  profiles:
+    default: local
 
   jpa:
     hibernate:
@@ -16,6 +13,8 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
+        jdbc:
+          time_zone: Asia/Taipei
 
   data:
     redis:
@@ -53,3 +52,27 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] [%X{traceId}] %-40.40logger{39} : %m%n"
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    url: "jdbc:mysql://localhost:3306/gbc?useSSL=false&serverTimezone=Asia/Taipei&allowPublicKeyRetrieval=true&sessionVariables=time_zone='%2B08:00'"
+    username: ${DB_USERNAME:root}
+    password: ${GBC_DB_PASSWORD:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+  datasource:
+    url: "jdbc:mysql://optooldb.c38wsm6mye7w.ap-south-1.rds.amazonaws.com:3306/gbc?useSSL=false&serverTimezone=Asia/Taipei&allowPublicKeyRetrieval=true&sessionVariables=time_zone='%2B08:00'"
+    username: ${DB_USERNAME:root}
+    password: ${GBC_DB_PASSWORD:password}
+    driver-class-name: com.mysql.cj.jdbc.Driver

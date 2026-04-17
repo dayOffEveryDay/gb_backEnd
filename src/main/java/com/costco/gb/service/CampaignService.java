@@ -169,6 +169,43 @@ public class CampaignService {
         }
     }
 
+    @Transactional
+    public void updateCampaignImageOrder(Long campaignId, Long userId, List<String> newImageUrls) {
+        Campaign campaign = campaignRepository.findById(campaignId)
+                .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+
+        // 🛡️ 防護一：權限檢查 (只有主揪可以調整圖片)
+        if (!campaign.getHost().getId().equals(userId)) {
+            throw new RuntimeException("權限不足：只有主揪可以調整圖片順序");
+        }
+
+        // 🛡️ 防護二：數量防呆檢查
+        // 因為資料庫存的是 String (例如 "url1,url2,url3")，我們要先用逗號切開來算數量
+        String currentUrlsStr = campaign.getImageUrls();
+        int oldSize = 0;
+        if (currentUrlsStr != null && !currentUrlsStr.trim().isEmpty()) {
+            oldSize = currentUrlsStr.split(",").length; // 用逗號切開算長度
+        }
+
+        int newSize = (newImageUrls != null) ? newImageUrls.size() : 0;
+
+        if (oldSize != newSize) {
+            throw new IllegalArgumentException("圖片數量不符，無法更新排序。舊數量: " + oldSize + ", 新數量: " + newSize);
+        }
+
+        // 🌟 核心修復：將前端傳來的 List<String> 組合回「逗號分隔的字串」
+        String joinedUrls = "";
+        if (newImageUrls != null && !newImageUrls.isEmpty()) {
+            joinedUrls = String.join(",", newImageUrls);
+        }
+
+        // 存回實體 (現在型別都是 String 了，編譯器會很開心)
+        campaign.setImageUrls(joinedUrls);
+        campaignRepository.save(campaign);
+
+        log.info("合購單 {} 圖片順序已更新: {}", campaignId, joinedUrls);
+    }
+
     // 🌟 查詢我發起的合購單
     @Transactional(readOnly = true)
     public Page<CampaignSummaryResponse> getMyHostedCampaigns(Long userId, Pageable pageable) {

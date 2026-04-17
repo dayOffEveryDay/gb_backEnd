@@ -46,7 +46,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/line", "/images/**").permitAll() // Line 登入
                         .requestMatchers(HttpMethod.GET, "/api/v1/stores").permitAll() // 門市列表
                         .requestMatchers(HttpMethod.GET, "/api/v1/categories").permitAll() // 分類列表
-
+                        .requestMatchers("/uploads/**", "/images/**").permitAll() // 🌟 把 /images/** 也加進去
                         // 3. 【合購大廳的瀏覽權限】
                         // 列表與明細大家都能看，但 POST (發起開團)、PUT/DELETE (修改狀態) 不在此限
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns").permitAll()

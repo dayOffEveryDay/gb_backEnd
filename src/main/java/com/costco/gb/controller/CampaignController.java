@@ -1,7 +1,6 @@
 package com.costco.gb.controller;
 
-import com.costco.gb.dto.request.CreateCampaignRequest;
-import com.costco.gb.dto.request.ReviseHostQuantityRequest;
+import com.costco.gb.dto.request.*;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
 //import com.costco.gb.dto.response.CreditLogResponse;
 import com.costco.gb.dto.response.HostDashboardResponse;
@@ -13,10 +12,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
-import com.costco.gb.dto.request.JoinCampaignRequest;
 import org.springframework.web.bind.annotation.PathVariable;
 import java.util.Map;
-import com.costco.gb.dto.request.ReviseCampaignRequest;
+
 import com.costco.gb.dto.response.MyParticipationResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
 
@@ -69,6 +67,23 @@ public class CampaignController {
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "合購單發起成功！"
+        ));
+    }
+    // 🌟 更新合購單圖片順序
+    @PutMapping("/{campaignId}/images/order")
+    public ResponseEntity<?> updateImageOrder(
+            @PathVariable Long campaignId,
+            @RequestBody UpdateImageOrderRequest request) {
+
+        // 取得當前使用者 ID (主揪)
+        String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long currentUserId = Long.parseLong(userIdStr);
+
+        campaignService.updateCampaignImageOrder(campaignId, currentUserId, request.getImageUrls());
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "圖片順序已成功更新"
         ));
     }
 

@@ -85,4 +85,10 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
+//    // 讓 404 找不到資源的錯誤安靜地回傳，不要印出一大堆 StackTrace
+//    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+//    public ResponseEntity<?> handleNoResourceFoundException(Exception e) {
+//        // 直接回傳 404 狀態碼即可
+//        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("找不到該圖片或資源");
+//    }
 }

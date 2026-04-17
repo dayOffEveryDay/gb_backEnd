@@ -28,15 +28,15 @@ public class AuthController {
     /**
      * ⚠️ 警告：這是開發者專用的後門 API，正式上線前請務必刪除或用 @Profile("dev") 限制！
      */
-    @GetMapping("/dev-login")
-    public ResponseEntity<Map<String, String>> devLogin(@RequestParam(defaultValue = "1") Long userId) {
-        // 直接無腦印鈔票 (發放 Token)
-        String token = jwtService.generateToken(userId);
-
-        return ResponseEntity.ok(Map.of(
-                "message", "開發者後門登入成功",
-                "userId", String.valueOf(userId),
-                "token", token
-        ));
-    }
+//    @GetMapping("/dev-login")
+//    public ResponseEntity<Map<String, String>> devLogin(@RequestParam(defaultValue = "1") Long userId) {
+//        // 直接無腦印鈔票 (發放 Token)
+//        String token = jwtService.generateToken(userId);
+//
+//        return ResponseEntity.ok(Map.of(
+//                "message", "開發者後門登入成功",
+//                "userId", String.valueOf(userId),
+//                "token", token
+//        ));
+//    }
 }
