@@ -7,6 +7,7 @@
 - Base Path: `/api/v1`
 - 預設 HTTP Port: `8080`
 - 靜態圖片路徑: `/images/{fileName}`
+- 聊天室上傳圖片回傳路徑: `/uploads/campaigns/{campaignId}/{fileName}` 或 `/uploads/general/{fileName}`
 - WebSocket STOMP Endpoint: `/ws`
 - REST 預設 Content-Type: `application/json`
 - 建立合購含圖片上傳時使用 Content-Type: `multipart/form-data`
@@ -21,6 +22,7 @@
 - `GET /api/v1/categories`
 - `GET /api/v1/campaigns`
 - `/images/**`
+- `/uploads/**`
 - `/ws/**`
 
 其餘 REST API 預設需要在 Header 帶入 JWT：
@@ -218,7 +220,43 @@ Request Form Fields:
 - 系統會計算 `hostReservedQuantity = productTotalQuantity - openQuantity`。
 - 圖片會存到 `uploads/campaigns/`，對外讀取路徑為 `/images/{fileName}`。
 
-### 3.3 團主修改開放數量
+### 3.3 更新合購單圖片順序
+
+- Path: `/api/v1/campaigns/{campaignId}/images/order`
+- Method: `PUT`
+- Auth: JWT required
+- Content-Type: `application/json`
+
+Request Body:
+
+```json
+{
+  "imageUrls": [
+    "image-b.jpg",
+    "image-a.jpg",
+    "image-c.jpg"
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "圖片順序已成功更新"
+}
+```
+
+規則：
+
+- 只有該合購單團主可以更新圖片順序。
+- `imageUrls` 必須放入排序後的完整合購圖片檔名陣列，例如 `["image-b.jpg", "image-a.jpg"]`。
+- 此 API 是調整合購單圖片順序，不是聊天室圖片上傳路徑；不要傳 `/uploads/campaigns/{campaignId}/...`。
+- 新傳入的圖片數量必須和合購單目前圖片數量一致，只能調整順序，不能透過此 API 新增或刪除圖片。
+- 後端會依照 `imageUrls` 陣列順序重新儲存圖片排序。
+
+### 3.4 團主修改開放數量
 
 - Path: `/api/v1/campaigns/{id}/host-revise`
 - Method: `PUT`
@@ -241,7 +279,7 @@ Request Body:
 - `newOpenQuantity` 不可大於 `newProductTotalQuantity`。
 - `newOpenQuantity` 不可低於目前已加入數量。
 
-### 3.4 參加開團
+### 3.5 參加開團
 
 - Path: `/api/v1/campaigns/{id}/join`
 - Method: `POST`
@@ -264,7 +302,7 @@ Request Body:
 - 不可超過剩餘可加入數量。
 - 不可加入已過期合購。
 
-### 3.5 團主開啟修改模式
+### 3.6 團主開啟修改模式
 
 - Path: `/api/v1/campaigns/{id}/unlock`
 - Method: `POST`
@@ -276,7 +314,7 @@ Request Body:
 - 合購狀態必須是 `FULL`。
 - 開啟後團員可在允許條件下修改數量。
 
-### 3.6 團員減少數量
+### 3.7 團員減少數量
 
 - Path: `/api/v1/campaigns/{id}/revise`
 - Method: `POST`
@@ -299,7 +337,7 @@ Request Body:
 - 減少後數量不可低於 `1`。
 - 若要完全退出，應使用退出 API。
 
-### 3.7 退出開團
+### 3.8 退出開團
 
 - Path: `/api/v1/campaigns/{id}/withdraw`
 - Method: `POST`
@@ -319,7 +357,7 @@ Request Body:
 - 使用者 `participantCancelCount` 會加 `1`。
 - 團主會收到 `MEMBER_WITHDRAW` 通知。
 
-### 3.8 團主踢除團員
+### 3.9 團主踢除團員
 
 - Path: `/api/v1/campaigns/{id}/participants/{participantId}/kick`
 - Method: `POST`
@@ -349,7 +387,7 @@ Request Body:
 - `allowRevision` 設為 `false`。
 - 發送 `KICKED` 通知。
 
-### 3.9 團主宣告已面交
+### 3.10 團主宣告已面交
 
 - Path: `/api/v1/campaigns/{id}/deliver`
 - Method: `POST`
@@ -378,7 +416,7 @@ WebSocket 廣播範例：
 }
 ```
 
-### 3.10 團員確認收貨
+### 3.11 團員確認收貨
 
 - Path: `/api/v1/campaigns/{id}/confirm`
 - Method: `POST`
@@ -397,7 +435,7 @@ WebSocket 廣播範例：
 - campaign 完成時寫入 `completedAt`。
 - campaign 完成時發送 `CAMPAIGN_COMPLETED` 通知給團主與所有 `CONFIRMED` 團員。
 
-### 3.11 團主取消開團
+### 3.12 團主取消開團
 
 - Path: `/api/v1/campaigns/{id}/cancel`
 - Method: `POST`
@@ -420,7 +458,7 @@ WebSocket 廣播範例：
 
 - 目前 `scoreChange = 10` 代表程式實作是加分紀錄；如果產品規格是取消要扣分，程式應改為 `-10`。
 
-### 3.12 團主標記團員未到場
+### 3.13 團主標記團員未到場
 
 - Path: `/api/v1/campaigns/{campaignId}/participants/{userId}/no-show`
 - Method: `PUT`
@@ -442,7 +480,7 @@ Request Body:
 - 目標 participant 狀態必須是 `JOINED` 或 `COMPLETED`。
 - `note` 會記錄到 participant `hostNote`。
 
-### 3.13 團員提出爭議
+### 3.14 團員提出爭議
 
 - Path: `/api/v1/campaigns/{campaignId}/dispute`
 - Method: `POST`
@@ -468,7 +506,7 @@ Request Body:
 - participant `disputeReason` 記錄爭議原因。
 - 發送 `DISPUTE_RAISED` 通知給團主。
 
-### 3.14 查詢我的信用紀錄（舊路徑，已停用）
+### 3.15 查詢我的信用紀錄（舊路徑，已停用）
 
 - Path: `/api/v1/campaigns/me/credit-logs`
 - Method: `GET`
@@ -479,7 +517,7 @@ Request Body:
 - 舊 DTO `CreditLogResponse` 已標記 `@Deprecated`。
 - 前端請改用新版 `/api/v1/credit-scores/me/logs`。
 
-### 3.15 查詢我開的團
+### 3.16 查詢我開的團
 
 - Path: `/api/v1/campaigns/my-hosted`
 - Method: `GET`
@@ -491,7 +529,7 @@ Query Params:
 
 Response: `Page<CampaignSummaryResponse>`
 
-### 3.16 查詢我參加的團
+### 3.17 查詢我參加的團
 
 - Path: `/api/v1/campaigns/my-joined`
 - Method: `GET`
@@ -511,7 +549,7 @@ Response: `Page<CampaignSummaryResponse>`
 - `NO_SHOW`
 - `CONFIRMED`
 
-### 3.17 團主查看團務儀表板
+### 3.18 團主查看團務儀表板
 
 - Path: `/api/v1/campaigns/{id}/host-dashboard`
 - Method: `GET`
@@ -519,7 +557,7 @@ Response: `Page<CampaignSummaryResponse>`
 
 Response: `HostDashboardResponse`
 
-### 3.18 查詢我在某團的參與資訊
+### 3.19 查詢我在某團的參與資訊
 
 - Path: `/api/v1/campaigns/{id}/participants/me`
 - Method: `GET`
@@ -869,6 +907,41 @@ Response: `List<ChatMessageResponse>`
 
 - 查詢指定合購聊天室歷史訊息。
 - WebSocket 即時訊息仍由 STOMP channel 傳送。
+
+### 9.2 上傳聊天室圖片
+
+- Path: `/api/v1/files/upload`
+- Method: `POST`
+- Auth: JWT required
+- Content-Type: `multipart/form-data`
+
+Request Form Fields:
+
+- `files` `List<MultipartFile>`, required，要上傳的圖片檔，可一次上傳多張。
+- `campaignId` `Long`, optional，聊天室所屬的合購 id。
+
+Response:
+
+```json
+{
+  "success": true,
+  "urls": [
+    "/uploads/campaigns/123/550e8400-e29b-41d4-a716-446655440000.jpg",
+    "/uploads/campaigns/123/7c9e6679-7425-40de-944b-e07fc1f90ae7.png"
+  ]
+}
+```
+
+說明：
+
+- 此 API 提供聊天室先批次上傳圖片使用。
+- 有帶 `campaignId` 時，檔案會存到 `uploads/campaigns/{campaignId}/`。
+- 未帶 `campaignId` 時，檔案會存到 `uploads/general/`。
+- 檔名會改成 UUID，副檔名沿用原始檔案副檔名。
+- 空檔案會被略過，不會出現在回傳的 `urls` 內。
+- `Content-Type` 為 `image/*` 的檔案會壓縮為最大寬高 `1280x1280`、輸出品質 `0.75`。
+- 非圖片檔案目前會直接原檔儲存。
+- 前端取得 `urls` 後，可將圖片網址放進聊天室訊息內容，再透過 STOMP 發送到 `/app/chat/{campaignId}/sendMessage`。
 
 ## 10. WebSocket / STOMP
 
