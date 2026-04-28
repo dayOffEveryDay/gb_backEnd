@@ -29,12 +29,14 @@ public class AuthController {
 
     @PostMapping("/line")
     public ResponseEntity<AuthResponse> lineLogin(@RequestBody LineLoginRequest request) {
+        // LINE 登入成功後會同時回傳 Access Token 與 Refresh Token
         AuthResponse response = authService.lineLogin(request);
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<?> refreshToken(@RequestBody TokenRefreshRequest request) {
+        // 前端帶 Refresh Token 來換發新的短效 Access Token
         String requestRefreshToken = request.getRefreshToken();
 
         return refreshTokenService.findByToken(requestRefreshToken)
@@ -52,6 +54,7 @@ public class AuthController {
 
     @GetMapping("/dev-login")
     public ResponseEntity<Map<String, String>> devLogin(@RequestParam(defaultValue = "1") Long userId) {
+        // 開發環境用登入入口，方便直接取得測試用 token
         String token = jwtService.generateToken(userId);
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(userId);
 

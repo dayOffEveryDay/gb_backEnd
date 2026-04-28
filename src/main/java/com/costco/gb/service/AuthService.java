@@ -30,7 +30,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final UserPreferenceRepository userPreferenceRepository;
     private final JwtService jwtService;
-    private final RestTemplate restTemplate = new RestTemplate(); // 直接實例化即可使用
+    private final RestTemplate restTemplate = new RestTemplate(); // 呼叫 LINE API 使用的 HTTP 客戶端
     private final RefreshTokenService refreshTokenService;
 
     @Value("${line.api.client-id}")
@@ -47,38 +47,38 @@ public class AuthService {
 
     @Transactional
     public AuthResponse lineLogin(LineLoginRequest request) {
-        // Step 1: 向 Line 換取 Access Token
+        // Step 1: 使用 LINE 授權碼換取 Access Token
         String lineAccessToken = getLineAccessToken(request.getCode(), request.getRedirectUri());
 
-        // Step 2: 拿 Access Token 取得使用者 Profile (Line UID, 暱稱, 頭像)
+        // Step 2: 使用 Access Token 取得使用者 Profile
         Map<String, Object> lineProfile = getLineUserProfile(lineAccessToken);
         String lineUid = (String) lineProfile.get("userId");
         String displayName = (String) lineProfile.get("displayName");
         String pictureUrl = (String) lineProfile.get("pictureUrl");
 
-        // Step 3: 檢查資料庫是否有此使用者，沒有則註冊 (Upsert 邏輯)
+        // Step 3: 依 LINE UID 查詢既有會員，沒有資料時建立新會員
         Optional<User> userOptional = userRepository.findByLineUid(lineUid);
         User user;
         boolean isNewUser = false;
 
         if (userOptional.isPresent()) {
             user = userOptional.get();
-            // 可以選擇在此時更新使用者的 Line 暱稱和頭像，保持最新狀態
+            // 每次登入時同步 LINE 最新顯示名稱與頭像
             user.setDisplayName(displayName);
             user.setProfileImageUrl(pictureUrl);
             user = userRepository.save(user);
         } else {
-            // 新使用者註冊
+            // 第一次登入時建立會員資料
             isNewUser = true;
             user = User.builder()
                     .lineUid(lineUid)
                     .displayName(displayName)
                     .profileImageUrl(pictureUrl)
-                    .hasCostcoMembership(false) // 預設無好市多會員
+                    .hasCostcoMembership(false) // 預設尚未綁定 Costco 會員
                     .build();
             user = userRepository.save(user);
 
-            // 建立預設的 UserPreference (這一步很重要，否則未來查詢偏好會 NPE)
+            // 同步建立使用者偏好設定，避免後續查詢偏好時發生空值
             UserPreference preference = UserPreference.builder()
                     .user(user)
                     .receiveNotifications(true)
@@ -89,14 +89,14 @@ public class AuthService {
             log.info("New user registered with Line UID: {}", lineUid);
         }
 
-        // Step 4: 核發我們系統專屬的 JWT Token
+        // Step 4: 產生短效 JWT Access Token
         String jwtToken = jwtService.generateToken(user.getId());
-        // Step 4.2: 產生長命的 Refresh Token (存入資料庫)
+        // Step 4.2: 產生長效 Refresh Token 並保存到資料庫
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getId());
-        // Step 5: 組裝回傳格式給前端
+        // Step 5: 回傳登入憑證與使用者基本資料
         return AuthResponse.builder()
                 .token(jwtToken)
-                .refreshToken(refreshToken.getToken()) // 將長命的 Refresh Token 塞進去
+                .refreshToken(refreshToken.getToken()) // 前端用於換發新的 Access Token
                 .isNewUser(isNewUser)
                 .user(AuthResponse.UserDto.builder()
                         .id(user.getId())
@@ -107,13 +107,13 @@ public class AuthService {
                 .build();
     }
 
-    // --- 以下為呼叫 Line API 的私有輔助方法 ---
+    // --- LINE API 呼叫輔助方法 ---
 
     private String getLineAccessToken(String code, String redirectUri) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-        // Line API 規定要用 Form URL Encoded 格式
+        // LINE token API 要求使用 Form URL Encoded 格式
         MultiValueMap<String, String> map = new LinkedMultiValueMap<>();
         map.add("grant_type", "authorization_code");
         map.add("code", code);

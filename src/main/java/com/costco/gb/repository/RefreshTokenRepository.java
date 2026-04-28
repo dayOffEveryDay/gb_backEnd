@@ -11,6 +11,6 @@ import java.util.Optional;
 public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
     Optional<RefreshToken> findByToken(String token);
 
-    // 使用者登出時，把他的 Token 刪掉
+    // 登出或清除登入狀態時，刪除該使用者全部 Refresh Token
     void deleteByUser(User user);
 }

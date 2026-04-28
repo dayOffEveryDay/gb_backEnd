@@ -20,16 +20,16 @@ public class RefreshToken {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 🌟 一個 User 可以有多個 Refresh Token (例如同時登入手機和電腦)
+    // 一位使用者可以擁有多筆 Refresh Token，支援多裝置登入
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    // 這是給前端拿來換 Access Token 的那串亂碼
+    // 前端用來換發 Access Token 的長效憑證
     @Column(nullable = false, unique = true)
     private String token;
 
-    // 到期時間
+    // token 到期時間，用於刷新前驗證是否仍有效
     @Column(nullable = false)
     private Instant expiryDate;
 }

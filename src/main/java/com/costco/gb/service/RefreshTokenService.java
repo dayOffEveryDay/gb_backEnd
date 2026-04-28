@@ -19,7 +19,7 @@ public class RefreshTokenService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRepository userRepository;
 
-    // 🌟 Refresh Token 壽命設定為 30 天 (以毫秒為單位)
+    // Refresh Token 有效期限：30 天，單位為毫秒
     private final Long REFRESH_TOKEN_EXPIRATION = 2592000000L;
 
     public RefreshToken createRefreshToken(Long userId) {
@@ -28,7 +28,7 @@ public class RefreshTokenService {
 
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
-                .token(UUID.randomUUID().toString()) // 產生安全的隨機字串
+                .token(UUID.randomUUID().toString()) // 使用 UUID 產生不可預測的 token 字串
                 .expiryDate(Instant.now().plusMillis(REFRESH_TOKEN_EXPIRATION))
                 .build();
 
@@ -36,18 +36,19 @@ public class RefreshTokenService {
     }
 
     public RefreshToken verifyExpiration(RefreshToken token) {
-        // 如果現在的時間已經超過了到期時間
+        // Refresh Token 過期時立即刪除，避免之後再次被使用
         if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
-            refreshTokenRepository.delete(token); // 過期就從資料庫清掉
-            throw new RuntimeException("Refresh token 已經過期，請重新登入");
+            refreshTokenRepository.delete(token);
+            throw new RuntimeException("Refresh token 已過期，請重新登入");
         }
         return token;
     }
 
-    // 🌟 新增這個方法：讓 Controller 可以透過 Service 去資料庫撈 Token
+    // 依 token 字串查詢資料庫中的 Refresh Token
     public Optional<RefreshToken> findByToken(String token) {
         return refreshTokenRepository.findByToken(token);
     }
+
     @Transactional
     public void deleteByUserId(Long userId) {
         userRepository.findById(userId).ifPresent(refreshTokenRepository::deleteByUser);
