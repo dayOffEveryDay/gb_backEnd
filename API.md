@@ -17,6 +17,7 @@
 以下 API 不需要 JWT：
 
 - `POST /api/v1/auth/line`
+- `POST /api/v1/auth/refresh`
 - `GET /api/v1/auth/dev-login`
 - `GET /api/v1/stores`
 - `GET /api/v1/categories`
@@ -97,13 +98,58 @@ Request Body:
 
 Response: `AuthResponse`
 
+Response Example:
+
+```json
+{
+  "token": "jwt-token",
+  "isNewUser": false,
+  "refreshToken": "refresh-token",
+  "user": {
+    "id": 1,
+    "displayName": "Howard",
+    "profileImageUrl": "https://profile.line-scdn.net/...",
+    "hasCostcoMembership": false
+  }
+}
+```
+
 說明：
 
 - 使用 LINE OAuth code 換取 LINE access token。
 - 取得 LINE profile 後，依 `lineUid` 建立或查詢使用者。
-- 回傳系統 JWT 給前端後續呼叫受保護 API 使用。
+- 回傳系統 JWT 與 `refreshToken`，供前端後續呼叫受保護 API 與換發 access token。
 
-### 1.2 Dev Login
+### 1.2 Refresh Token
+
+- Path: `/api/v1/auth/refresh`
+- Method: `POST`
+- Auth: 不需要
+- Content-Type: `application/json`
+
+Request Body:
+
+```json
+{
+  "refreshToken": "refresh-token"
+}
+```
+
+Response:
+
+```json
+{
+  "token": "new-jwt-token",
+  "refreshToken": "refresh-token"
+}
+```
+
+說明：
+
+- 使用資料庫中有效且未過期的 `refreshToken` 換發新的 access token。
+- 目前 refresh 成功後會沿用原本的 `refreshToken`，不會重新旋轉。
+
+### 1.3 Dev Login
 
 - Path: `/api/v1/auth/dev-login`
 - Method: `GET`
@@ -117,16 +163,17 @@ Response:
 
 ```json
 {
-  "message": "dev login success",
+  "message": "Developer login successful",
   "userId": "1",
-  "token": "jwt-token"
+  "token": "jwt-token",
+  "refreshToken": "refresh-token"
 }
 ```
 
 說明：
 
 - 開發測試用登入 API。
-- 會依指定 `userId` 產生 JWT。
+- 會依指定 `userId` 產生 JWT 與 `refreshToken`。
 
 ## 2. Reference Data API
 

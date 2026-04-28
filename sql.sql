@@ -138,6 +138,17 @@ CREATE TABLE user_follows (
     UNIQUE KEY unique_follow (follower_id, host_id)
 );
 
+CREATE TABLE `refresh_tokens` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `token` varchar(255) NOT NULL COMMENT '給前端換發用的隨機字串',
+  `expiry_date` datetime(6) NOT NULL COMMENT '絕對到期時間',
+  `user_id` bigint NOT NULL COMMENT '關聯到哪一個使用者',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_refresh_token` (`token`), -- 確保 token 不重複，加快查詢速度
+  KEY `idx_refresh_token_user` (`user_id`),
+  CONSTRAINT `fk_refresh_token_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='存放長效型 Refresh Token';
+
 CREATE TABLE blocks (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     blocker_id BIGINT NOT NULL COMMENT '執行拉黑者',

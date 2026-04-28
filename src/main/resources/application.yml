@@ -42,7 +42,8 @@ application:
       # 你可以用線上工具生成一組新的，長度至少要 32 個字元轉 Base64。
       secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
       # Token 過期時間：這裡設定為 30 天 (30 * 24 * 60 * 60 * 1000 毫秒)
-      expiration: 2592000000
+      #expiration: 2592000000
+      expiration: 604800000
 logging:
   level:
     com.costco.gb: DEBUG

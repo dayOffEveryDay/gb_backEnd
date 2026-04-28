@@ -2,6 +2,7 @@ package com.costco.gb.service;
 
 import com.costco.gb.dto.request.LineLoginRequest;
 import com.costco.gb.dto.response.AuthResponse;
+import com.costco.gb.entity.RefreshToken;
 import com.costco.gb.entity.User;
 import com.costco.gb.entity.UserPreference;
 import com.costco.gb.repository.UserPreferenceRepository;
@@ -30,6 +31,7 @@ public class AuthService {
     private final UserPreferenceRepository userPreferenceRepository;
     private final JwtService jwtService;
     private final RestTemplate restTemplate = new RestTemplate(); // 直接實例化即可使用
+    private final RefreshTokenService refreshTokenService;
 
     @Value("${line.api.client-id}")
     private String channelId;
@@ -89,10 +91,12 @@ public class AuthService {
 
         // Step 4: 核發我們系統專屬的 JWT Token
         String jwtToken = jwtService.generateToken(user.getId());
-
+        // Step 4.2: 產生長命的 Refresh Token (存入資料庫)
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getId());
         // Step 5: 組裝回傳格式給前端
         return AuthResponse.builder()
                 .token(jwtToken)
+                .refreshToken(refreshToken.getToken()) // 將長命的 Refresh Token 塞進去
                 .isNewUser(isNewUser)
                 .user(AuthResponse.UserDto.builder()
                         .id(user.getId())
