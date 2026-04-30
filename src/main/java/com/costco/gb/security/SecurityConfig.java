@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.util.matcher.RegexRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -39,6 +40,8 @@ public class SecurityConfig {
                         .requestMatchers("/uploads/**", "/images/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/purchase-requests").permitAll()
+                        .requestMatchers(new RegexRequestMatcher("^/api/v1/purchase-requests/\\d+$", "GET")).permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .anyRequest().authenticated()
                 )

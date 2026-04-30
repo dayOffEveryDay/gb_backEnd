@@ -22,6 +22,8 @@
 - `GET /api/v1/stores`
 - `GET /api/v1/categories`
 - `GET /api/v1/campaigns`
+- `GET /api/v1/purchase-requests`
+- `GET /api/v1/purchase-requests/{id}`
 - `/images/**`
 - `/uploads/**`
 - `/ws/**`
@@ -911,6 +913,18 @@ Response: `Page<NotificationResponse>`
 - `NO_SHOW_WARNING`: 團員被標記未到場警告
 - `DISPUTE_RAISED`: 團員提出爭議
 
+託購通知 type:
+
+- `PURCHASE_QUOTED`: 跑腿者對託購單報價，通知委託人
+- `PURCHASE_QUOTE_UPDATED`: 跑腿者修改報價，通知委託人
+- `PURCHASE_QUOTE_CANCELLED`: 跑腿者取消報價，通知委託人
+- `PURCHASE_ACCEPTED`: 固定酬金託購單被承接，通知委託人
+- `PURCHASE_QUOTE_ACCEPTED`: 委託人接受報價，通知被選中的跑腿者
+- `PURCHASE_QUOTE_REJECTED`: 委託人接受其他報價，通知未被選中的報價者
+- `PURCHASE_DELIVERED`: 跑腿者標記已交付，通知委託人
+- `PURCHASE_COMPLETED`: 委託人確認完成，通知跑腿者
+- `PURCHASE_CANCELLED`: 委託人取消託購，通知待確認報價者
+
 ## 8. Credit Score API
 
 ### 8.1 查詢我的信用分異動紀錄
@@ -939,6 +953,12 @@ Response: `Page<CreditScoreLogResponse>`
 - 依 `createdAt desc` 排序。
 - 讀取資料表 `credit_score_logs`。
 - `CreditLogResponse` 已標記 deprecated，前端請改用 `CreditScoreLogResponse`。
+
+Credit score log source fields:
+
+- `campaignId`: 合購來源 id，非合購來源時為 null
+- `purchaseRequestId`: 託購來源 id，非託購來源時為 null
+- `sourceType`: `CAMPAIGN` / `PURCHASE_REQUEST` / `SYSTEM`
 
 ## 9. Chat REST API
 
@@ -990,7 +1010,245 @@ Response:
 - 非圖片檔案目前會直接原檔儲存。
 - 前端取得 `urls` 後，可將圖片網址放進聊天室訊息內容，再透過 STOMP 發送到 `/app/chat/{campaignId}/sendMessage`。
 
-## 10. WebSocket / STOMP
+## 11. Purchase Request API
+
+託購功能使用 `/api/v1/purchase-requests`，圖片沿用合購圖片目錄，回傳圖片網址格式為 `/images/{fileName}`。
+
+`purchase_request.status`:
+
+- `OPEN`: 開放中，可承接或報價
+- `ASSIGNED`: 已成立，已有跑腿者
+- `DELIVERED`: 跑腿者已標記交付
+- `COMPLETED`: 委託人已確認完成
+- `CANCELLED`: 委託人已取消
+
+`purchase_request.rewardType`:
+
+- `FIXED`: 固定酬金，跑腿者可直接承接
+- `QUOTE`: 跑腿者報價，委託人接受報價後成立
+
+`purchase_request_quote.status`:
+
+- `PENDING`: 等待委託人確認
+- `ACCEPTED`: 已接受
+- `REJECTED`: 已拒絕
+- `CANCELLED`: 報價者取消
+
+### 11.1 查詢目前託購單
+
+- Path: `/api/v1/purchase-requests`
+- Method: `GET`
+- Auth: 不需登入
+
+Query Params:
+
+- `keyword` `String`, optional，商品名稱關鍵字
+- `rewardType` `String`, optional，`FIXED` 或 `QUOTE`
+- `deliveryMethod` `String`, optional，`FACE_TO_FACE` / `STORE_TO_STORE` / `HOME_DELIVERY`
+- `requestArea` `String`, optional，委託地區
+- `status` `String`, optional，不傳時預設只查 `OPEN` 且未過期資料
+- `page` `int`, optional, default `0`
+- `size` `int`, optional, default `10`
+
+Response: `Page<PurchaseRequestResponse>`
+
+```json
+{
+  "content": [
+    {
+      "id": 12,
+      "productName": "柯克蘭衛生紙",
+      "imageUrls": ["http://localhost:8080/images/xxx.jpg"],
+      "rewardType": "FIXED",
+      "fixedRewardAmount": 100,
+      "quoteCount": 0,
+      "deliveryMethod": "FACE_TO_FACE",
+      "requestArea": "台北中山區",
+      "deadlineAt": "2026-05-30T23:59:59",
+      "minCreditScore": 80,
+      "status": "OPEN",
+      "requester": {
+        "id": 3,
+        "displayName": "王曉明",
+        "profileImageUrl": "...",
+        "creditScore": 92
+      },
+      "canQuote": false,
+      "canAcceptDirectly": true,
+      "canEdit": false,
+      "actBlockedReason": null
+    }
+  ],
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+### 11.2 查詢託購單詳情
+
+- Path: `/api/v1/purchase-requests/{requestId}`
+- Method: `GET`
+- Auth: 不需登入
+
+Response: `PurchaseRequestResponse`
+
+### 11.3 建立託購單
+
+- Path: `/api/v1/purchase-requests`
+- Method: `POST`
+- Auth: JWT required
+- Content-Type: `multipart/form-data`
+
+Request Form Fields:
+
+- `productName` `String`, required
+- `rewardType` `String`, required，`FIXED` 或 `QUOTE`
+- `fixedRewardAmount` `BigDecimal`, `rewardType=FIXED` 時 required
+- `deliveryMethod` `String`, required，`FACE_TO_FACE` / `STORE_TO_STORE` / `HOME_DELIVERY`
+- `requestArea` `String`, optional
+- `deadlineAt` `LocalDateTime`, optional，空值代表無期限
+- `deliveryTimeType` `String`, optional，`SPECIFIED` 或 `DISCUSS`
+- `deliveryTimeNote` `String`, optional
+- `minCreditScore` `Integer`, optional，空值代表不限信用分
+- `description` `String`, optional
+- `images` `List<MultipartFile>`, optional，最多 3 張
+
+Response: `PurchaseRequestResponse`
+
+### 11.4 編輯託購單
+
+- Path: `/api/v1/purchase-requests/{requestId}`
+- Method: `PUT`
+- Auth: JWT required
+- Content-Type: `application/json`
+
+限制:
+
+- 只有委託人可編輯
+- 只有 `OPEN` 狀態可編輯
+- 已有人報價時不能切換 `rewardType`
+
+### 11.5 託購單圖片
+
+- `POST /api/v1/purchase-requests/{requestId}/images`: 新增圖片，`multipart/form-data`，field `images`
+- `PUT /api/v1/purchase-requests/{requestId}/images/order`: 調整圖片排序，body `{"imageUrls":["image-b.jpg","image-a.jpg"]}`
+- `DELETE /api/v1/purchase-requests/{requestId}/images/{fileName}`: 刪除圖片
+
+### 11.6 固定酬金承接
+
+- Path: `/api/v1/purchase-requests/{requestId}/accept`
+- Method: `POST`
+- Auth: JWT required
+
+限制:
+
+- 只適用 `rewardType=FIXED`
+- 跑腿者不能是委託人
+- 託購單必須是 `OPEN`
+- 跑腿者信用分必須符合 `minCreditScore`
+
+效果:
+
+- `assignedRunner` 設為目前使用者
+- `status` 改為 `ASSIGNED`
+
+### 11.7 跑腿者報價
+
+- `POST /api/v1/purchase-requests/{requestId}/quotes`: 建立報價，body `{"quoteAmount":120,"note":"週末可以面交"}`
+- `PUT /api/v1/purchase-requests/{requestId}/quotes/{quoteId}`: 編輯自己的待確認報價
+- `POST /api/v1/purchase-requests/{requestId}/quotes/{quoteId}/cancel`: 取消自己的待確認報價
+- `GET /api/v1/purchase-requests/{requestId}/quotes`: 委託人查詢完整報價列表
+- `GET /api/v1/purchase-requests/{requestId}/quotes/me`: 跑腿者查詢自己的報價
+
+### 11.8 接受報價並成立
+
+- Path: `/api/v1/purchase-requests/{requestId}/quotes/{quoteId}/accept`
+- Method: `POST`
+- Auth: JWT required
+
+效果:
+
+- 指定報價改為 `ACCEPTED`
+- 其他待確認報價改為 `REJECTED`
+- `assignedRunner` 設為報價者
+- `acceptedQuoteId` 設為該報價
+- `status` 改為 `ASSIGNED`
+
+### 11.9 交付與完成
+
+- `POST /api/v1/purchase-requests/{requestId}/deliver`: 跑腿者標記已交付，狀態改為 `DELIVERED`
+- `POST /api/v1/purchase-requests/{requestId}/complete`: 委託人確認完成，狀態改為 `COMPLETED`
+
+### 11.10 取消託購
+
+### 11.10 託購評價
+
+- Path: `/api/v1/purchase-requests/{requestId}/reviews`
+- Method: `POST`
+- Auth: JWT required
+
+Request Body:
+
+```json
+{
+  "rating": 5,
+  "comment": "溝通順利"
+}
+```
+
+限制:
+
+- 託購單必須是 `COMPLETED`
+- 只有委託人和承接跑腿者可以互評
+- 委託人只能評價 `assignedRunner`
+- 跑腿者只能評價 `requester`
+- 同一張託購單、同一評價方向只能評一次
+
+信用分規則:
+
+- `5` 星: `+1`
+- `1` 星: `-3`
+- 同一 reviewer 對同一 reviewee 的正評，7 天內只計分一次
+- 託購評價與合購評價共用同一個 `users.credit_score`
+- 託購評價造成的信用分紀錄會寫入 `credit_score_logs.purchase_request_id`
+
+查詢我對這張託購單是否已評價:
+
+- Path: `/api/v1/purchase-requests/{requestId}/reviews/status`
+- Method: `GET`
+- Auth: JWT required
+
+查詢我收到的託購評價:
+
+- Path: `/api/v1/purchase-requests/me/received-reviews`
+- Method: `GET`
+- Auth: JWT required
+- Response: `Page<PurchaseRequestReviewResponse>`
+
+### 11.11 取消託購
+
+- Path: `/api/v1/purchase-requests/{requestId}/cancel`
+- Method: `POST`
+- Auth: JWT required
+
+```json
+{
+  "reason": "暫時不需要了"
+}
+```
+
+限制:
+
+- 只有委託人可取消
+- 第一版只允許 `OPEN` 狀態取消
+
+### 11.11 我的託購
+
+- `GET /api/v1/purchase-requests/my-created`: 我發起的託購
+- `GET /api/v1/purchase-requests/my-assigned`: 我承接的託購
+- `GET /api/v1/purchase-requests/my-quotes`: 我報價過的託購
+
+## 12. WebSocket / STOMP
 
 ### 10.1 連線資訊
 

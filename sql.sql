@@ -282,3 +282,110 @@ CREATE TABLE credit_score_logs (
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL,
     INDEX idx_user_created (user_id, created_at) -- 加速前端查詢歷史明細
 );
+-- 1. 託購委託單主表
+CREATE TABLE purchase_requests (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    requester_id BIGINT NOT NULL COMMENT '委託人 user id',
+    product_name VARCHAR(255) NOT NULL COMMENT '商品名稱',
+    image_urls VARCHAR(1000) DEFAULT NULL COMMENT '商品圖片檔名，多張逗號分隔，最多3張',
+
+    reward_type VARCHAR(20) NOT NULL COMMENT 'FIXED / QUOTE',
+    fixed_reward_amount DECIMAL(10,2) DEFAULT NULL COMMENT '固定酬金',
+
+    delivery_method VARCHAR(30) NOT NULL COMMENT 'FACE_TO_FACE / STORE_TO_STORE / HOME_DELIVERY',
+    request_area VARCHAR(100) DEFAULT NULL COMMENT '委託地區',
+
+    deadline_at DATETIME DEFAULT NULL COMMENT '委託期限，NULL代表無期限',
+    delivery_time_type VARCHAR(20) NOT NULL DEFAULT 'DISCUSS' COMMENT 'SPECIFIED / DISCUSS',
+    delivery_time_note VARCHAR(255) DEFAULT NULL COMMENT '交貨時間說明',
+
+    min_credit_score INT DEFAULT NULL COMMENT '最低信用分，NULL代表不限',
+    description TEXT DEFAULT NULL COMMENT '委託說明',
+
+    status VARCHAR(30) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN / ASSIGNED / DELIVERED / COMPLETED / CANCELLED',
+    assigned_runner_id BIGINT DEFAULT NULL COMMENT '承接跑腿者',
+    accepted_quote_id BIGINT DEFAULT NULL COMMENT '接受的報價 id',
+    chat_room_id BIGINT DEFAULT NULL COMMENT '預留聊天室 id',
+
+    delivered_at DATETIME DEFAULT NULL,
+    completed_at DATETIME DEFAULT NULL,
+    cancel_reason VARCHAR(255) DEFAULT NULL,
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    KEY idx_purchase_requests_requester (requester_id),
+    KEY idx_purchase_requests_runner (assigned_runner_id),
+    KEY idx_purchase_requests_status_deadline (status, deadline_at),
+    KEY idx_purchase_requests_reward_type (reward_type),
+    KEY idx_purchase_requests_delivery_method (delivery_method),
+
+    CONSTRAINT fk_purchase_requests_requester
+        FOREIGN KEY (requester_id) REFERENCES users(id),
+
+    CONSTRAINT fk_purchase_requests_runner
+        FOREIGN KEY (assigned_runner_id) REFERENCES users(id)
+);
+-- 2. 託購報價表
+CREATE TABLE purchase_request_quotes (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    purchase_request_id BIGINT NOT NULL COMMENT '託購單 id',
+    runner_id BIGINT NOT NULL COMMENT '報價跑腿者 user id',
+    quote_amount DECIMAL(10,2) NOT NULL COMMENT '報價金額',
+    note TEXT DEFAULT NULL COMMENT '報價備註',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / ACCEPTED / REJECTED / CANCELLED',
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_purchase_request_runner (purchase_request_id, runner_id),
+    KEY idx_purchase_request_quotes_runner (runner_id),
+    KEY idx_purchase_request_quotes_status (purchase_request_id, status),
+
+    CONSTRAINT fk_purchase_request_quotes_request
+        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
+
+    CONSTRAINT fk_purchase_request_quotes_runner
+        FOREIGN KEY (runner_id) REFERENCES users(id)
+);
+-- purchase_requests.accepted_quote_id 要等 quotes table 建好後再補 FK
+ALTER TABLE purchase_requests
+ADD CONSTRAINT fk_purchase_requests_accepted_quote
+FOREIGN KEY (accepted_quote_id) REFERENCES purchase_request_quotes(id);
+-- 3. 託購評價表
+CREATE TABLE purchase_request_reviews (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    purchase_request_id BIGINT NOT NULL COMMENT '託購單 id',
+    reviewer_id BIGINT NOT NULL COMMENT '評價者 user id',
+    reviewee_id BIGINT NOT NULL COMMENT '被評價者 user id',
+    rating INT NOT NULL COMMENT '評價星等 1~5',
+    comment VARCHAR(255) DEFAULT NULL COMMENT '評價內容',
+    is_score_counted BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否已計入信用分',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_purchase_request_review_direction (purchase_request_id, reviewer_id, reviewee_id),
+    KEY idx_purchase_review_reviewee_created (reviewee_id, created_at),
+    KEY idx_purchase_review_anti_fraud (reviewer_id, reviewee_id, is_score_counted, created_at),
+
+    CONSTRAINT fk_purchase_reviews_request
+        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
+
+    CONSTRAINT fk_purchase_reviews_reviewer
+        FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+
+    CONSTRAINT fk_purchase_reviews_reviewee
+        FOREIGN KEY (reviewee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+-- 4. 信用分紀錄補託購來源
+ALTER TABLE credit_score_logs
+ADD COLUMN purchase_request_id BIGINT DEFAULT NULL COMMENT '託購單 id';
+
+ALTER TABLE credit_score_logs
+ADD KEY idx_credit_score_logs_purchase_request (purchase_request_id);
+
+ALTER TABLE credit_score_logs
+ADD CONSTRAINT fk_credit_score_logs_purchase_request
+FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE SET NULL;

@@ -12,5 +12,7 @@ public class CreditScoreLogResponse {
     private Integer scoreChange; // 異動分數
     private String reason;       // 異動原因
     private Long campaignId;     // 相關合購單 (供前端跳轉)
+    private Long purchaseRequestId;
+    private String sourceType;
     private LocalDateTime createdAt;
 }

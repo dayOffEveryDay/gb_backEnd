@@ -34,12 +34,24 @@ public class CreditScoreService {
                 .scoreChange(log.getScoreChange())
                 .reason(log.getReason())
                 .campaignId(log.getCampaignId())
+                .purchaseRequestId(log.getPurchaseRequestId())
+                .sourceType(resolveSourceType(log))
                 .createdAt(log.getCreatedAt())
                 .build());
     }
     // 🌟 2. 系統內部專用：記錄分數異動的「核心記帳」方法
     @Transactional
     public void recordScoreChange(Long userId, Integer scoreChange, String reason, Long campaignId) {
+        recordScoreChange(userId, scoreChange, reason, campaignId, null);
+    }
+
+    @Transactional
+    public void recordPurchaseRequestScoreChange(Long userId, Integer scoreChange, String reason, Long purchaseRequestId) {
+        recordScoreChange(userId, scoreChange, reason, null, purchaseRequestId);
+    }
+
+    @Transactional
+    public void recordScoreChange(Long userId, Integer scoreChange, String reason, Long campaignId, Long purchaseRequestId) {
         if (scoreChange == null || scoreChange == 0) {
             return;
         }
@@ -70,6 +82,7 @@ public class CreditScoreService {
                 .scoreChange(scoreChange)
                 .reason(reason)
                 .campaignId(campaignId)
+                .purchaseRequestId(purchaseRequestId)
                 .build();
 
         creditScoreLogRepository.save(logEntry);
@@ -77,5 +90,14 @@ public class CreditScoreService {
         log.info("會員 {} 信用分異動: {}. 結算: {}", userId, scoreChange, newScore);
     }
 
+    private String resolveSourceType(CreditScoreLog log) {
+        if (log.getPurchaseRequestId() != null) {
+            return "PURCHASE_REQUEST";
+        }
+        if (log.getCampaignId() != null) {
+            return "CAMPAIGN";
+        }
+        return "SYSTEM";
+    }
 
 }

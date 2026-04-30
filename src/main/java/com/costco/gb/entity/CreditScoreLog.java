@@ -33,6 +33,9 @@ public class CreditScoreLog {
     @Column(name = "campaign_id")
     private Long campaignId;
 
+    @Column(name = "purchase_request_id")
+    private Long purchaseRequestId;
+
     // 異動時間
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
