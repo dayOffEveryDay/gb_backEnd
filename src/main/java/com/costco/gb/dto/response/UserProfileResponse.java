@@ -12,8 +12,11 @@ public class UserProfileResponse {
     private String displayName;
     private String avatarUrl;        // 頭像 (對應 DB 的 profile_image_url)
     private Integer creditScore;     // 信用分數
+    private Integer noShowCount;     // 棄單/未到場次數
     private Integer totalHostedCount;// 歷史總開團數
+    private Integer hostCancelCount; // 團主取消次數
     private Integer totalJoinedCount;// 歷史總參團數
+    private Integer participantCancelCount; // 參團者取消次數
     private LocalDateTime joinDate;  // 加入平台時間 (對應 created_at)
 
     // 🌟 他現在正在開的團 (讓前端可以直接渲染出卡片列表)

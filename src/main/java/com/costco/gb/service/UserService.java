@@ -99,8 +99,11 @@ public class UserService {
                 .displayName(targetUser.getDisplayName())
                 .avatarUrl(targetUser.getProfileImageUrl()) // 抓取大頭貼
                 .creditScore(targetUser.getCreditScore())
+                .noShowCount(targetUser.getNoShowCount())
                 .totalHostedCount(targetUser.getTotalHostedCount())
+                .hostCancelCount(targetUser.getHostCancelCount())
                 .totalJoinedCount(targetUser.getTotalJoinedCount())
+                .participantCancelCount(targetUser.getParticipantCancelCount())
                 .joinDate(targetUser.getCreatedAt())
                 .activeCampaigns(campaignDtos)
                 .build();

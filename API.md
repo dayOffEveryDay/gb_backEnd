@@ -678,8 +678,11 @@ Response: `UserProfileResponse`
 - `displayName`: 顯示名稱
 - `avatarUrl`: 頭像
 - `creditScore`: 目前信用分
+- `noShowCount`: 棄單/未到場次數
 - `totalHostedCount`: 開團總數
+- `hostCancelCount`: 團主取消次數
 - `totalJoinedCount`: 參團總數
+- `participantCancelCount`: 參團者取消次數
 - `joinDate`: 加入時間
 - `activeCampaigns`: 使用者目前進行中的合購清單
 

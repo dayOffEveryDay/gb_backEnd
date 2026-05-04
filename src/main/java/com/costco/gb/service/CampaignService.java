@@ -152,6 +152,8 @@ public class CampaignService {
 
             // 5. 寫入資料庫
             campaignRepository.save(campaign);
+            host.setTotalHostedCount(incrementCount(host.getTotalHostedCount()));
+            userRepository.save(host);
             // TODO: V2 進階版，我們要在這裡把 availableQuantity 寫入 Redis，準備迎接高併發搶單！
             // (未來實作提示：redisTemplate.opsForValue().set("campaign:stock:" + campaign.getId(), String.valueOf(campaign.getAvailableQuantity())); )
             log.info("User {} 成功發起了合購單: {}", hostId, campaign.getItemName());
@@ -420,7 +422,8 @@ public class CampaignService {
 
         } else {
             // 🛡️ 判斷 3：他是首購族，資料庫完全沒有他的紀錄
-            User user = userRepository.getReferenceById(userId);
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
             Participant newParticipant = Participant.builder()
                     .campaign(campaign)
                     .user(user)
@@ -428,6 +431,8 @@ public class CampaignService {
                     .status("JOINED") // 預設狀態為加入
                     .build();
             participantRepository.save(newParticipant);
+            user.setTotalJoinedCount(incrementCount(user.getTotalJoinedCount()));
+            userRepository.save(user);
 
             log.info("User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
         }
@@ -473,7 +478,6 @@ public class CampaignService {
         participant.setStatus("KICKED");
         participant.setHostNote(reason);
         participantRepository.save(participant);
-
         // 2. 釋放他佔用的數量
         int freedQuantity = participant.getQuantity();
         campaign.setAvailableQuantity(campaign.getAvailableQuantity() + freedQuantity);
@@ -595,7 +599,7 @@ public class CampaignService {
 
         // 5. 信用記點：增加反悔次數 (這招超棒！)
         User user = userRepository.findById(userId).orElseThrow();
-        user.setParticipantCancelCount(user.getParticipantCancelCount() + 1);
+        user.setParticipantCancelCount(incrementCount(user.getParticipantCancelCount()));
         userRepository.save(user);
 
         log.info("User {} 成功退出了合購單 {}，釋放數量: {}，累積反悔次數: {}",
@@ -755,6 +759,10 @@ public class CampaignService {
             creditScoreService.recordScoreChange (hostId, 10, "取消已有團員的合購單：「" + campaign.getItemName() + "」" ,campaignId);
 
             // 2. 將所有無辜團員「強制踢下車」
+            User host = campaign.getHost();
+            host.setHostCancelCount(incrementCount(host.getHostCancelCount()));
+            userRepository.save(host);
+
             for (Participant p : activeParticipants) {
                 p.setStatus("CANCELLED");
             }
@@ -832,6 +840,9 @@ public class CampaignService {
         participant.setStatus("NO_SHOW");
         participant.setHostNote(note); // 🌟 關鍵：存入團主的備註
         participantRepository.save(participant);
+        User targetUser = participant.getUser();
+        targetUser.setNoShowCount(incrementCount(targetUser.getNoShowCount()));
+        userRepository.save(targetUser);
 
         log.info("🚨 團主 {} 已將團員 {} 標記為棄單 (合購單 {})", currentUserId, targetUserId, campaignId);
 
@@ -869,6 +880,10 @@ public class CampaignService {
 
         // 🌟 觸發推播：通知團主有人提出爭議了，訂單已凍結！
         notificationService.notifyHostAboutDispute(campaign);
+    }
+
+    private int incrementCount(Integer currentCount) {
+        return currentCount == null ? 1 : currentCount + 1;
     }
 
 }
