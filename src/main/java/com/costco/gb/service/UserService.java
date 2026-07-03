@@ -30,7 +30,7 @@ public class UserService {
 //    private final CreditScoreLogRepository creditScoreLogRepository;
     private final BlockRepository blockRepository;
     private final CampaignRepository campaignRepository;
-    private final CampaignMapper campaignMapper; // 🌟 注入專屬的轉換器
+    private final CampaignMapper campaignMapper;
 
     @Transactional
     public void updateProfile(Long userId, UpdateProfileRequest request) {
@@ -88,12 +88,12 @@ public class UserService {
         // 📦 3. 撈取他正在開的團，並轉換成大廳用的 DTO 格式
         List<Campaign> activeCampaigns = campaignRepository.findActiveCampaignsByHostId(targetUserId);
 
-        // (假設你的 CampaignService 裡有一個 mapToSummaryResponse 可以把 Entity 轉成 DTO)
+        // 將使用者目前進行中的合購轉換成摘要 DTO
         List<CampaignSummaryResponse> campaignDtos = activeCampaigns.stream()
                 .map(campaignMapper::toSummaryResponse)
                 .toList();
 
-        // 🚀 4. 組裝成最終的 Profile 回傳
+        // 4. 組裝使用者 Profile 回傳資料
         return UserProfileResponse.builder()
                 .userId(targetUser.getId())
                 .displayName(targetUser.getDisplayName())

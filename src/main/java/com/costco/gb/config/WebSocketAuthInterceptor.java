@@ -1,6 +1,6 @@
 package com.costco.gb.config;
 
-import com.costco.gb.security.JwtService; // 替換成你實際解析 JWT 的 Service
+import com.costco.gb.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.Message;
@@ -40,7 +40,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                     // 1. 存入口袋 (聊天室抓取歷史紀錄可能還是會用到)
                     accessor.getSessionAttributes().put("userId", userId);
 
-                    // 🌟 2. 終極修復：製作一張名牌 (Principal)，並掛在連線上！
+                    // 2. 將已驗證的使用者 ID 設為 WebSocket 連線 Principal
                     // 這樣 Spring 才知道這個連線的主人是誰，convertAndSendToUser 才能精準投遞！
                     Principal userPrincipal = () -> userIdStr; // 這裡的名字必須是字串型態的 userId
                     accessor.setUser(userPrincipal);

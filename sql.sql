@@ -282,110 +282,311 @@ CREATE TABLE credit_score_logs (
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL,
     INDEX idx_user_created (user_id, created_at) -- 加速前端查詢歷史明細
 );
--- 1. 託購委託單主表
-CREATE TABLE purchase_requests (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    requester_id BIGINT NOT NULL COMMENT '委託人 user id',
-    product_name VARCHAR(255) NOT NULL COMMENT '商品名稱',
-    image_urls VARCHAR(1000) DEFAULT NULL COMMENT '商品圖片檔名，多張逗號分隔，最多3張',
 
-    reward_type VARCHAR(20) NOT NULL COMMENT 'FIXED / QUOTE',
-    fixed_reward_amount DECIMAL(10,2) DEFAULT NULL COMMENT '固定酬金',
+-- 使用者常用交付資料表
+CREATE TABLE user_delivery_profiles (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
 
-    delivery_method VARCHAR(30) NOT NULL COMMENT 'FACE_TO_FACE / STORE_TO_STORE / HOME_DELIVERY',
-    request_area VARCHAR(100) DEFAULT NULL COMMENT '委託地區',
+    user_id BIGINT NOT NULL COMMENT '使用者ID',
 
-    deadline_at DATETIME DEFAULT NULL COMMENT '委託期限，NULL代表無期限',
-    delivery_time_type VARCHAR(20) NOT NULL DEFAULT 'DISCUSS' COMMENT 'SPECIFIED / DISCUSS',
-    delivery_time_note VARCHAR(255) DEFAULT NULL COMMENT '交貨時間說明',
+    profile_type VARCHAR(30) NOT NULL COMMENT 'FACE_TO_FACE, HOME_DELIVERY, STORE_TO_STORE',
+    location_type VARCHAR(30) NULL COMMENT 'TRANSIT_RANGE, LANDMARK, ROAD, DISTRICT, ADDRESS, STORE, CUSTOM',
 
-    min_credit_score INT DEFAULT NULL COMMENT '最低信用分，NULL代表不限',
-    description TEXT DEFAULT NULL COMMENT '委託說明',
+    label VARCHAR(100) NULL COMMENT '使用者自訂名稱，例如：家裡、公司、常用面交點',
 
-    status VARCHAR(30) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN / ASSIGNED / DELIVERED / COMPLETED / CANCELLED',
-    assigned_runner_id BIGINT DEFAULT NULL COMMENT '承接跑腿者',
-    accepted_quote_id BIGINT DEFAULT NULL COMMENT '接受的報價 id',
-    chat_room_id BIGINT DEFAULT NULL COMMENT '預留聊天室 id',
+    city VARCHAR(50) NULL COMMENT '縣市',
+    district VARCHAR(50) NULL COMMENT '行政區',
 
-    delivered_at DATETIME DEFAULT NULL,
-    completed_at DATETIME DEFAULT NULL,
-    cancel_reason VARCHAR(255) DEFAULT NULL,
+    location_name VARCHAR(100) NULL COMMENT '地標、路線、道路、店名或地址摘要',
+    range_start VARCHAR(100) NULL COMMENT '起點，例如：府中、一段',
+    range_end VARCHAR(100) NULL COMMENT '終點，例如：市政府、二段',
+
+    display_text VARCHAR(255) NOT NULL COMMENT '前端顯示文字，例如：板南線 府中～市政府',
+
+    detail JSON NULL COMMENT '完整資料，保留彈性',
+
+    is_default BOOLEAN DEFAULT FALSE COMMENT '是否預設',
 
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (id),
-    KEY idx_purchase_requests_requester (requester_id),
-    KEY idx_purchase_requests_runner (assigned_runner_id),
-    KEY idx_purchase_requests_status_deadline (status, deadline_at),
-    KEY idx_purchase_requests_reward_type (reward_type),
-    KEY idx_purchase_requests_delivery_method (delivery_method),
+    CONSTRAINT fk_user_delivery_profiles_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+    INDEX idx_user_delivery_profiles_user_type (user_id, profile_type),
+    INDEX idx_user_delivery_profiles_city_type (city, location_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='使用者常用交付資料表';
+
+-- 委託單主表
+CREATE TABLE purchase_requests (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    requester_id BIGINT NOT NULL COMMENT '委託人ID',
+
+    item_name VARCHAR(255) NOT NULL COMMENT '託購商品名稱',
+    item_description TEXT NULL COMMENT '商品補充說明',
+    image_urls JSON NULL COMMENT '商品圖片，多張圖片用 JSON 陣列',
+
+    reward_type VARCHAR(30) NOT NULL COMMENT 'FIXED, QUOTE',
+    fixed_reward_amount INT NULL COMMENT '固定酬金金額，reward_type=FIXED 時必填',
+
+    requester_city VARCHAR(50) NOT NULL COMMENT '委託者所在城市',
+    requester_district VARCHAR(50) NULL COMMENT '委託者所在行政區',
+
+    delivery_method VARCHAR(30) NOT NULL COMMENT 'FACE_TO_FACE, HOME_DELIVERY, STORE_TO_STORE',
+    delivery_public_summary VARCHAR(255) NOT NULL COMMENT '公開顯示交貨摘要',
+    delivery_private_detail JSON NULL COMMENT '成立後才顯示的私密交貨資料，例如宅配地址、電話、店到店資訊',
+
+    request_expire_time DATETIME NOT NULL COMMENT '委託期限，超過後未成立則過期',
+    delivery_deadline_hours INT NOT NULL COMMENT '訂單成立後幾小時內需完成交貨',
+
+    min_credit_score INT DEFAULT 0 COMMENT '最低信用分限制',
+
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN'
+        COMMENT 'OPEN, QUOTING, ORDERED, EXPIRED, CANCELLED',
+
+    reopen_count INT DEFAULT 0 COMMENT '重新開放次數',
+    last_reopen_reason VARCHAR(100) NULL COMMENT '最後重新開放原因',
+
+    cancelled_at DATETIME NULL COMMENT '委託單取消時間',
+    expired_at DATETIME NULL COMMENT '委託單過期時間',
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
     CONSTRAINT fk_purchase_requests_requester
         FOREIGN KEY (requester_id) REFERENCES users(id),
 
-    CONSTRAINT fk_purchase_requests_runner
-        FOREIGN KEY (assigned_runner_id) REFERENCES users(id)
-);
--- 2. 託購報價表
-CREATE TABLE purchase_request_quotes (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    purchase_request_id BIGINT NOT NULL COMMENT '託購單 id',
-    runner_id BIGINT NOT NULL COMMENT '報價跑腿者 user id',
-    quote_amount DECIMAL(10,2) NOT NULL COMMENT '報價金額',
-    note TEXT DEFAULT NULL COMMENT '報價備註',
-    status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / ACCEPTED / REJECTED / CANCELLED',
+    INDEX idx_purchase_requests_status_expire (status, request_expire_time),
+    INDEX idx_purchase_requests_requester_status (requester_id, status),
+    INDEX idx_purchase_requests_city_status (requester_city, status),
+    INDEX idx_purchase_requests_reward_status (reward_type, status),
+    INDEX idx_purchase_requests_delivery_status (delivery_method, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='託購委託單主表';
+
+-- 委託單面交範圍快照表
+CREATE TABLE purchase_request_meetup_ranges (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    request_id BIGINT NOT NULL COMMENT '委託單ID',
+
+    source_profile_id BIGINT NULL COMMENT '來源常用交付資料ID，手動輸入則為NULL',
+
+    location_type VARCHAR(30) NOT NULL COMMENT 'TRANSIT_RANGE, LANDMARK, ROAD, DISTRICT, CUSTOM',
+
+    city VARCHAR(50) NULL COMMENT '縣市',
+    district VARCHAR(50) NULL COMMENT '行政區',
+
+    location_name VARCHAR(100) NULL COMMENT '地標、路線、道路名稱',
+    range_start VARCHAR(100) NULL COMMENT '起點，例如：府中、一段',
+    range_end VARCHAR(100) NULL COMMENT '終點，例如：市政府、二段',
+
+    display_text VARCHAR(255) NOT NULL COMMENT '顯示文字，例如：板南線 府中～市政府',
+
+    detail JSON NULL COMMENT '完整資料快照',
+
+    latitude DECIMAL(10, 7) NULL COMMENT '緯度，可選',
+    longitude DECIMAL(10, 7) NULL COMMENT '經度，可選',
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_purchase_request_meetup_ranges_request
+        FOREIGN KEY (request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
+
+    CONSTRAINT fk_purchase_request_meetup_ranges_profile
+        FOREIGN KEY (source_profile_id) REFERENCES user_delivery_profiles(id) ON DELETE SET NULL,
+
+    INDEX idx_purchase_request_meetup_ranges_request (request_id),
+    INDEX idx_purchase_request_meetup_ranges_city_type (city, location_type),
+    INDEX idx_purchase_request_meetup_ranges_location (location_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='委託單面交範圍快照表';
+
+-- 報價單表
+CREATE TABLE purchase_quotes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    request_id BIGINT NOT NULL COMMENT '委託單ID',
+    quoter_id BIGINT NOT NULL COMMENT '報價者ID',
+
+    quote_amount INT NOT NULL COMMENT '報價酬金',
+    quote_note VARCHAR(500) NULL COMMENT '報價備註',
+
+    status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE'
+        COMMENT 'ACTIVE, WITHDRAWN, SELECTED, NOT_SELECTED, EXPIRED, UNAVAILABLE_CANCELLED',
+
+    selected_at DATETIME NULL COMMENT '被選中時間',
+    withdrawn_at DATETIME NULL COMMENT '撤回時間',
 
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_purchase_request_runner (purchase_request_id, runner_id),
-    KEY idx_purchase_request_quotes_runner (runner_id),
-    KEY idx_purchase_request_quotes_status (purchase_request_id, status),
+    CONSTRAINT fk_purchase_quotes_request
+        FOREIGN KEY (request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
 
-    CONSTRAINT fk_purchase_request_quotes_request
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_purchase_quotes_quoter
+        FOREIGN KEY (quoter_id) REFERENCES users(id),
 
-    CONSTRAINT fk_purchase_request_quotes_runner
-        FOREIGN KEY (runner_id) REFERENCES users(id)
-);
--- purchase_requests.accepted_quote_id 要等 quotes table 建好後再補 FK
-ALTER TABLE purchase_requests
-ADD CONSTRAINT fk_purchase_requests_accepted_quote
-FOREIGN KEY (accepted_quote_id) REFERENCES purchase_request_quotes(id);
--- 3. 託購評價表
-CREATE TABLE purchase_request_reviews (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    purchase_request_id BIGINT NOT NULL COMMENT '託購單 id',
-    reviewer_id BIGINT NOT NULL COMMENT '評價者 user id',
-    reviewee_id BIGINT NOT NULL COMMENT '被評價者 user id',
-    rating INT NOT NULL COMMENT '評價星等 1~5',
-    comment VARCHAR(255) DEFAULT NULL COMMENT '評價內容',
-    is_score_counted BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否已計入信用分',
+    UNIQUE KEY uk_purchase_quotes_request_quoter (request_id, quoter_id),
+
+    INDEX idx_purchase_quotes_request_status (request_id, status),
+    INDEX idx_purchase_quotes_quoter_status (quoter_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='託購報價單表';
+
+-- 委託訂單表
+CREATE TABLE purchase_orders (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    request_id BIGINT NOT NULL COMMENT '來源委託單ID',
+
+    requester_id BIGINT NOT NULL COMMENT '委託人ID',
+    runner_id BIGINT NOT NULL COMMENT '接單人ID',
+
+    selected_quote_id BIGINT NULL COMMENT '報價制時，被選中的報價ID；固定酬金則為NULL',
+
+    status VARCHAR(50) NOT NULL DEFAULT 'WAITING_CONFIRMATION'
+        COMMENT 'WAITING_CONFIRMATION, CONFIRMED, IN_PROGRESS, SHIPPED, DELIVERED_PENDING_CONFIRM, COMPLETED, CANCELLED, ABNORMAL_PENDING_RESPONSE, PENALIZED_CANCELLED, DISPUTE_CLOSED_NO_PENALTY, UNAVAILABLE_CANCELLED',
+
+    requester_confirmed_at DATETIME NULL COMMENT '委託人確認交易時間',
+    runner_confirmed_at DATETIME NULL COMMENT '接單人確認交易時間',
+
+    started_at DATETIME NULL COMMENT '接單人開始處理時間',
+
+    logistics_provider VARCHAR(50) NULL COMMENT '物流公司，宅配/店到店使用',
+    tracking_number VARCHAR(100) NULL COMMENT '物流單號，宅配/店到店使用',
+    tracking_url VARCHAR(500) NULL COMMENT '物流查詢網址',
+
+    shipped_at DATETIME NULL COMMENT '宅配/店到店寄出時間',
+    delivered_at DATETIME NULL COMMENT '接單人標記交貨時間',
+    completed_at DATETIME NULL COMMENT '訂單完成時間',
+    cancelled_at DATETIME NULL COMMENT '訂單取消時間',
+
+    cancel_reason VARCHAR(100) NULL COMMENT '取消原因',
+    blame_user_id BIGINT NULL COMMENT '責任方ID，無責則為NULL',
+    credit_penalty INT DEFAULT 0 COMMENT '本次扣除信用分',
+
+    abnormal_reporter_id BIGINT NULL COMMENT '異常提出者ID',
+    abnormal_reported_user_id BIGINT NULL COMMENT '被提出異常者ID',
+    abnormal_type VARCHAR(100) NULL COMMENT '異常類型',
+    abnormal_reported_at DATETIME NULL COMMENT '異常提出時間',
+    abnormal_responded_at DATETIME NULL COMMENT '被提出異常方回應時間',
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_purchase_orders_request
+        FOREIGN KEY (request_id) REFERENCES purchase_requests(id),
+
+    CONSTRAINT fk_purchase_orders_requester
+        FOREIGN KEY (requester_id) REFERENCES users(id),
+
+    CONSTRAINT fk_purchase_orders_runner
+        FOREIGN KEY (runner_id) REFERENCES users(id),
+
+    CONSTRAINT fk_purchase_orders_selected_quote
+        FOREIGN KEY (selected_quote_id) REFERENCES purchase_quotes(id),
+
+    CONSTRAINT fk_purchase_orders_blame_user
+        FOREIGN KEY (blame_user_id) REFERENCES users(id),
+
+    CONSTRAINT fk_purchase_orders_abnormal_reporter
+        FOREIGN KEY (abnormal_reporter_id) REFERENCES users(id),
+
+    CONSTRAINT fk_purchase_orders_abnormal_reported_user
+        FOREIGN KEY (abnormal_reported_user_id) REFERENCES users(id),
+
+    INDEX idx_purchase_orders_request (request_id),
+    INDEX idx_purchase_orders_requester_status (requester_id, status),
+    INDEX idx_purchase_orders_runner_status (runner_id, status),
+    INDEX idx_purchase_orders_status_created (status, created_at),
+    INDEX idx_purchase_orders_abnormal (status, abnormal_reported_at),
+    INDEX idx_purchase_orders_delivery_time (status, shipped_at, delivered_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='託購訂單表';
+
+-- 訂單事件紀錄表
+
+CREATE TABLE purchase_order_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+
+    order_id BIGINT NOT NULL COMMENT '訂單ID',
+    actor_id BIGINT NULL COMMENT '操作人ID，系統事件可為NULL',
+
+    event_type VARCHAR(80) NOT NULL COMMENT '事件類型',
+    from_status VARCHAR(50) NULL COMMENT '變更前狀態',
+    to_status VARCHAR(50) NULL COMMENT '變更後狀態',
+
+    description VARCHAR(1000) NULL COMMENT '事件描述',
+    metadata JSON NULL COMMENT '補充資料，例如扣分、原因、物流單號、缺貨說明',
+
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (id),
-    UNIQUE KEY uk_purchase_request_review_direction (purchase_request_id, reviewer_id, reviewee_id),
-    KEY idx_purchase_review_reviewee_created (reviewee_id, created_at),
-    KEY idx_purchase_review_anti_fraud (reviewer_id, reviewee_id, is_score_counted, created_at),
+    CONSTRAINT fk_purchase_order_events_order
+        FOREIGN KEY (order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
 
-    CONSTRAINT fk_purchase_reviews_request
-        FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_purchase_order_events_actor
+        FOREIGN KEY (actor_id) REFERENCES users(id),
 
-    CONSTRAINT fk_purchase_reviews_reviewer
-        FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_purchase_order_events_order_time (order_id, created_at),
+    INDEX idx_purchase_order_events_actor_time (actor_id, created_at),
+    INDEX idx_purchase_order_events_type_time (event_type, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='託購訂單事件紀錄表';
 
-    CONSTRAINT fk_purchase_reviews_reviewee
-        FOREIGN KEY (reviewee_id) REFERENCES users(id) ON DELETE CASCADE
-);
--- 4. 信用分紀錄補託購來源
-ALTER TABLE credit_score_logs
-ADD COLUMN purchase_request_id BIGINT DEFAULT NULL COMMENT '託購單 id';
+CREATE TABLE purchase_chat_rooms (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_id BIGINT NOT NULL COMMENT '託購訂單ID',
+    status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, READ_ONLY',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_purchase_chat_rooms_order FOREIGN KEY (order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_purchase_chat_rooms_order (order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='託購聊天室';
 
-ALTER TABLE credit_score_logs
-ADD KEY idx_credit_score_logs_purchase_request (purchase_request_id);
+CREATE TABLE purchase_chat_room_members (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    room_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    last_read_message_id BIGINT NULL,
+    last_read_at DATETIME NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_purchase_chat_members_room FOREIGN KEY (room_id) REFERENCES purchase_chat_rooms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_purchase_chat_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_purchase_chat_members_room_user (room_id, user_id),
+    INDEX idx_purchase_chat_members_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='託購聊天室成員與已讀進度';
 
-ALTER TABLE credit_score_logs
-ADD CONSTRAINT fk_credit_score_logs_purchase_request
-FOREIGN KEY (purchase_request_id) REFERENCES purchase_requests(id) ON DELETE SET NULL;
+CREATE TABLE purchase_chat_messages (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    room_id BIGINT NOT NULL,
+    sender_id BIGINT NOT NULL,
+    message_type VARCHAR(30) NOT NULL DEFAULT 'TEXT' COMMENT 'TEXT, IMAGE, SYSTEM',
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_purchase_chat_messages_room FOREIGN KEY (room_id) REFERENCES purchase_chat_rooms(id) ON DELETE CASCADE,
+    CONSTRAINT fk_purchase_chat_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id),
+    INDEX idx_purchase_chat_messages_room_time (room_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='託購聊天室訊息';
+
+CREATE TABLE purchase_order_reviews (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_id BIGINT NOT NULL,
+    reviewer_id BIGINT NOT NULL,
+    reviewee_id BIGINT NOT NULL,
+    rating INT NOT NULL,
+    comment VARCHAR(255) NULL,
+    is_score_counted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_purchase_reviews_order FOREIGN KEY (order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    CONSTRAINT fk_purchase_reviews_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_purchase_reviews_reviewee FOREIGN KEY (reviewee_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY uk_purchase_reviews_order_reviewer_reviewee (order_id, reviewer_id, reviewee_id),
+    INDEX idx_purchase_reviews_reviewee_time (reviewee_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='託購訂單評價';
+
+--

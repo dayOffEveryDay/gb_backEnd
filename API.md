@@ -1,20 +1,27 @@
 # API 文件
 
-本文件整理 `gb_backEnd` 目前對外提供的 REST API 與 WebSocket/STOMP 使用方式。內容依據目前 controller 與 service 實作整理，若程式碼與文件有落差，請以程式碼為準。
+本文件整理 `gb_backEnd` 目前提供的 REST API 與 WebSocket/STOMP 介面。
 
 ## 基本資訊
 
-- Base Path: `/api/v1`
-- 預設 HTTP Port: `8080`
-- 靜態圖片路徑: `/images/{fileName}`
-- 聊天室上傳圖片回傳路徑: `/uploads/campaigns/{campaignId}/{fileName}` 或 `/uploads/general/{fileName}`
-- WebSocket STOMP Endpoint: `/ws`
-- REST 預設 Content-Type: `application/json`
-- 建立合購含圖片上傳時使用 Content-Type: `multipart/form-data`
+- Base URL: `http://localhost:8080`
+- REST Base Path: `/api/v1`
+- REST Content-Type: `application/json`
+- 上傳檔案 Content-Type: `multipart/form-data`
+- 靜態圖片:
+  - `/images/{fileName}`
+  - `/uploads/**`
+- WebSocket/STOMP Endpoint: `/ws`
 
-## 認證規則
+需要登入的 REST API 請帶入 JWT:
 
-以下 API 不需要 JWT：
+```http
+Authorization: Bearer <JWT_TOKEN>
+```
+
+STOMP `CONNECT` 也使用相同 header。
+
+## 不需登入的 API
 
 - `POST /api/v1/auth/line`
 - `POST /api/v1/auth/refresh`
@@ -28,68 +35,84 @@
 - `/uploads/**`
 - `/ws/**`
 
-其餘 REST API 預設需要在 Header 帶入 JWT：
-
-```http
-Authorization: Bearer <JWT_TOKEN>
-```
-
-STOMP `CONNECT` 也需要帶入：
-
-```http
-Authorization: Bearer <JWT_TOKEN>
-```
-
-## 錯誤格式
-
-全域錯誤由 `GlobalExceptionHandler` 統一處理，常見格式如下：
+## 共用錯誤格式
 
 ```json
 {
-  "timestamp": "2026-04-06T12:00:00",
+  "timestamp": "2026-06-04T12:00:00",
   "status": 400,
   "error": "Bad Request",
   "message": "錯誤訊息",
-  "path": "/api/v1/xxx"
+  "path": "/api/v1/example"
 }
 ```
 
-## 常用狀態值
+## 狀態值
 
-`campaign.status`：
+### Campaign status
 
-- `OPEN`: 開放加入中
-- `FULL`: 已額滿
-- `DELIVERED`: 團主已宣告面交或交付，等待團員確認收貨
-- `COMPLETED`: 所有團員已確認收貨，合購完成
-- `CANCELLED`: 合購已取消
-- `HOST_NO_SHOW`: 團主逾時未交付，被系統判定放鳥
-- `FAILED`: 合購失敗或流局
+- `OPEN`: 開放加入
+- `FULL`: 名額已滿
+- `DELIVERED`: 主揪已完成交付，等待成員確認
+- `COMPLETED`: 團購完成
+- `CANCELLED`: 團購取消
+- `HOST_NO_SHOW`: 主揪未出現
+- `FAILED`: 團購失敗
 
-`participant.status`：
+### Participant status
 
 - `JOINED`: 已加入
-- `CANCELLED`: 已取消
-- `KICKED`: 被團主踢除
+- `CANCELLED`: 已退出
+- `KICKED`: 被主揪移除
 - `CONFIRMED`: 已確認收貨
-- `NO_SHOW`: 被標記未到場
+- `NO_SHOW`: 被標記未出現
 - `DISPUTED`: 已提出爭議
 
-`scenarioType`：
+### Purchase request status
 
-- `INSTANT`: 即時合購
-- `SCHEDULED`: 預約合購
+- `OPEN`: 開放接單或報價
+- `QUOTING`: 已有有效報價
+- `ORDERED`: 已成立託購訂單
+- `EXPIRED`: 委託期限已到期
+- `CANCELLED`: 委託人已取消
+
+### Purchase request enum values
+
+- `rewardType`: `FIXED` / `QUOTE`
+- `deliveryMethod`: `FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE`
+- `profileType`: `FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE`
+- `locationType`: `TRANSIT_RANGE` / `LANDMARK` / `ROAD` / `DISTRICT` / `ADDRESS` / `STORE` / `CUSTOM`
+
+### Purchase quote status
+
+- `ACTIVE`: 有效報價
+- `WITHDRAWN`: 報價者已撤回
+- `SELECTED`: 委託人已選定
+- `NOT_SELECTED`: 訂單成立時未被選中
+- `EXPIRED`: 委託取消或過期後失效
+- `UNAVAILABLE_CANCELLED`: 得標者回報缺貨後失效
+
+### Purchase order status
+
+- `WAITING_CONFIRMATION`: 訂單已成立，等待雙方確認
+- `CONFIRMED`: 雙方已確認
+- `IN_PROGRESS`: 接單人處理中
+- `SHIPPED`: 宅配或店到店已寄出
+- `DELIVERED_PENDING_CONFIRM`: 面交已交付，等待委託人確認
+- `COMPLETED`: 訂單已完成
+- `CANCELLED`: 一般取消
+- `UNAVAILABLE_CANCELLED`: 缺貨取消，不扣信用分
+- `ABNORMAL_PENDING_RESPONSE`: 異常提出，等待對方回應
+- `PENALIZED_CANCELLED`: 有責取消並已扣分
+- `DISPUTE_CLOSED_NO_PENALTY`: 異常有回應，不扣分結案
 
 ## 1. Auth API
 
-### 1.1 LINE Login
+### LINE Login
 
-- Path: `/api/v1/auth/line`
-- Method: `POST`
-- Auth: 不需要
-- Content-Type: `application/json`
+`POST /api/v1/auth/line`
 
-Request Body:
+Request:
 
 ```json
 {
@@ -98,9 +121,7 @@ Request Body:
 }
 ```
 
-Response: `AuthResponse`
-
-Response Example:
+Response:
 
 ```json
 {
@@ -109,27 +130,18 @@ Response Example:
   "refreshToken": "refresh-token",
   "user": {
     "id": 1,
-    "displayName": "Howard",
+    "displayName": "A Hui",
     "profileImageUrl": "https://profile.line-scdn.net/...",
-    "hasCostcoMembership": false
+    "hasCostcoMembership": true
   }
 }
 ```
 
-說明：
+### Refresh Token
 
-- 使用 LINE OAuth code 換取 LINE access token。
-- 取得 LINE profile 後，依 `lineUid` 建立或查詢使用者。
-- 回傳系統 JWT 與 `refreshToken`，供前端後續呼叫受保護 API 與換發 access token。
+`POST /api/v1/auth/refresh`
 
-### 1.2 Refresh Token
-
-- Path: `/api/v1/auth/refresh`
-- Method: `POST`
-- Auth: 不需要
-- Content-Type: `application/json`
-
-Request Body:
+Request:
 
 ```json
 {
@@ -146,484 +158,148 @@ Response:
 }
 ```
 
-說明：
+### Dev Login
 
-- 使用資料庫中有效且未過期的 `refreshToken` 換發新的 access token。
-- 目前 refresh 成功後會沿用原本的 `refreshToken`，不會重新旋轉。
+`GET /api/v1/auth/dev-login?userId=1`
 
-### 1.3 Dev Login
-
-- Path: `/api/v1/auth/dev-login`
-- Method: `GET`
-- Auth: 不需要
-
-Query Params:
-
-- `userId` `Long`, optional, default `1`
-
-Response:
-
-```json
-{
-  "message": "Developer login successful",
-  "userId": "1",
-  "token": "jwt-token",
-  "refreshToken": "refresh-token"
-}
-```
-
-說明：
-
-- 開發測試用登入 API。
-- 會依指定 `userId` 產生 JWT 與 `refreshToken`。
+僅供開發測試使用，回傳 JWT 與 refresh token。
 
 ## 2. Reference Data API
 
-### 2.1 取得門市清單
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/stores` | No | 取得啟用中的 Costco 分店 |
+| `GET` | `/api/v1/categories` | No | 取得商品分類 |
 
-- Path: `/api/v1/stores`
-- Method: `GET`
-- Auth: 不需要
-
-Response: `List<StoreResponse>`
-
-說明：
-
-- 回傳目前系統內建或啟用的 Costco 門市資料。
-
-### 2.2 取得分類清單
-
-- Path: `/api/v1/categories`
-- Method: `GET`
-- Auth: 不需要
-
-Response: `List<CategoryResponse>`
-
-說明：
-
-- 回傳商品分類資料，供建立合購或篩選合購列表使用。
-
-## 3. Campaign API
-
-### 3.1 查詢開團列表
-
-- Path: `/api/v1/campaigns`
-- Method: `GET`
-- Auth: 不需要
-
-Query Params:
-
-- `storeId` `Integer`, optional，依門市篩選
-- `categoryId` `Integer`, optional，依分類篩選
-- `keyword` `String`, optional，依關鍵字搜尋
-- `page` `int`, optional, default `0`
-- `size` `int`, optional, default `10`
-
-Response: `Page<CampaignSummaryResponse>`
-
-主要欄位：
-
-- `id`: 合購 id
-- `itemName`: 商品名稱
-- `imageUrls`: 圖片路徑清單
-- `pricePerUnit`: 單位價格
-- `totalQuantity`: 合購總數量
-- `availableQuantity`: 剩餘可加入數量
-- `meetupLocation`: 面交地點
-- `meetupTime`: 面交時間
-- `expireTime`: 合購截止時間
-- `status`: 合購狀態
-- `scenarioType`: 合購類型
-- `storeName`: 門市名稱
-- `categoryName`: 分類名稱
-- `host.id`: 團主 id
-- `host.displayName`: 團主顯示名稱
-- `host.profileImageUrl`: 團主頭像
-- `host.creditScore`: 團主目前信用分數
-
-### 3.2 建立開團
-
-- Path: `/api/v1/campaigns`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `multipart/form-data`
-
-Request Form Fields:
-
-- `storeId` `Integer`, required
-- `categoryId` `Integer`, required
-- `scenarioType` `String`, required，`INSTANT` 或 `SCHEDULED`
-- `itemName` `String`, required
-- `pricePerUnit` `Integer`, required
-- `productTotalQuantity` `Integer`, required
-- `openQuantity` `Integer`, required
-- `meetupLocation` `String`, required
-- `meetupTime` `LocalDateTime`, required
-- `expireTime` `LocalDateTime`, required
-- `images` `List<MultipartFile>`, optional，最多 `3` 張
-
-規則：
-
-- 開團者必須有 Costco 會員資格。
-- `openQuantity` 不可大於 `productTotalQuantity`。
-- 系統會計算 `hostReservedQuantity = productTotalQuantity - openQuantity`。
-- 圖片會存到 `uploads/campaigns/`，對外讀取路徑為 `/images/{fileName}`。
-
-### 3.3 更新合購單圖片順序
-
-- Path: `/api/v1/campaigns/{campaignId}/images/order`
-- Method: `PUT`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
+`StoreResponse`:
 
 ```json
 {
-  "imageUrls": [
-    "image-b.jpg",
-    "image-a.jpg",
-    "image-c.jpg"
-  ]
+  "id": 1,
+  "name": "內湖店",
+  "address": "台北市...",
+  "openTime": "10:00",
+  "closeTime": "21:30"
 }
 ```
+
+`CategoryResponse`:
+
+```json
+{
+  "id": 1,
+  "name": "食品",
+  "icon": "food"
+}
+```
+
+## 3. Campaign API
+
+### 取得團購列表
+
+`GET /api/v1/campaigns`
+
+Query params:
+
+- `storeId`: optional
+- `categoryId`: optional
+- `keyword`: optional
+- `page`: optional, default `0`
+- `size`: optional, default `10`
+
+Response: `Page<CampaignSummaryResponse>`
+
+`CampaignSummaryResponse` 主要欄位:
+
+- `id`
+- `itemName`
+- `imageUrls`
+- `pricePerUnit`
+- `totalQuantity`
+- `availableQuantity`
+- `meetupLocation`
+- `meetupTime`
+- `expireTime`
+- `status`
+- `scenarioType`
+- `storeName`
+- `categoryName`
+- `host`
+- `myParticipantStatus`
+
+### 建立團購
+
+`POST /api/v1/campaigns`
+
+Auth: required
+
+Content-Type: `multipart/form-data`
+
+Form fields:
+
+- `storeId`: required
+- `categoryId`: required
+- `scenarioType`: `INSTANT` 或 `SCHEDULED`
+- `itemName`: required
+- `pricePerUnit`: required
+- `productTotalQuantity`: required
+- `openQuantity`: required
+- `meetupLocation`: required
+- `meetupTime`: required, `LocalDateTime`
+- `expireTime`: required, `LocalDateTime`
+- `images`: optional, 最多 3 張
 
 Response:
 
 ```json
 {
   "success": true,
-  "message": "圖片順序已成功更新"
+  "message": "團購建立成功"
 }
 ```
 
-規則：
-
-- 只有該合購單團主可以更新圖片順序。
-- `imageUrls` 必須放入排序後的完整合購圖片檔名陣列，例如 `["image-b.jpg", "image-a.jpg"]`。
-- 此 API 是調整合購單圖片順序，不是聊天室圖片上傳路徑；不要傳 `/uploads/campaigns/{campaignId}/...`。
-- 新傳入的圖片數量必須和合購單目前圖片數量一致，只能調整順序，不能透過此 API 新增或刪除圖片。
-- 後端會依照 `imageUrls` 陣列順序重新儲存圖片排序。
-
-### 3.4 團主修改開放數量
-
-- Path: `/api/v1/campaigns/{id}/host-revise`
-- Method: `PUT`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
-
-```json
-{
-  "newProductTotalQuantity": 36,
-  "newOpenQuantity": 20
-}
-```
-
-規則：
-
-- 只有團主可以操作。
-- 合購狀態必須是 `OPEN`。
-- `newOpenQuantity` 不可大於 `newProductTotalQuantity`。
-- `newOpenQuantity` 不可低於目前已加入數量。
-
-### 3.5 參加開團
-
-- Path: `/api/v1/campaigns/{id}/join`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
-
-```json
-{
-  "quantity": 2
-}
-```
-
-規則：
-
-- `quantity >= 1`
-- 不可加入自己開的團。
-- 合購狀態必須是 `OPEN`。
-- 不可超過剩餘可加入數量。
-- 不可加入已過期合購。
-
-### 3.6 團主開啟修改模式
-
-- Path: `/api/v1/campaigns/{id}/unlock`
-- Method: `POST`
-- Auth: JWT required
-
-規則：
-
-- 只有團主可以操作。
-- 合購狀態必須是 `FULL`。
-- 開啟後團員可在允許條件下修改數量。
-
-### 3.7 團員減少數量
-
-- Path: `/api/v1/campaigns/{id}/revise`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
-
-```json
-{
-  "quantity": 1
-}
-```
-
-規則：
-
-- 只能修改自己的 `JOINED` 參與紀錄。
-- `quantity > 0`
-- 合購狀態必須是 `OPEN`，或 `allowRevision = true`。
-- 減少後數量不可低於 `1`。
-- 若要完全退出，應使用退出 API。
-
-### 3.8 退出開團
-
-- Path: `/api/v1/campaigns/{id}/withdraw`
-- Method: `POST`
-- Auth: JWT required
-
-規則：
-
-- 只能退出自己的 `JOINED` 參與紀錄。
-- 合購狀態必須是 `OPEN`，或 `allowRevision = true`。
-- 不可退出已過期合購。
-
-效果：
-
-- participant 狀態改為 `CANCELLED`。
-- 釋出原本加入的數量。
-- campaign 狀態會回到 `OPEN`。
-- 使用者 `participantCancelCount` 會加 `1`。
-- 團主會收到 `MEMBER_WITHDRAW` 通知。
-
-### 3.9 團主踢除團員
-
-- Path: `/api/v1/campaigns/{id}/participants/{participantId}/kick`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
-
-```json
-{
-  "reason": "超過約定時間未回覆"
-}
-```
-
-規則：
-
-- 只有團主可以操作。
-- 合購狀態必須是 `OPEN` 或 `FULL`。
-- 不可在 `DELIVERED` 或 `CONFIRMED` 後踢除。
-- 目標使用者必須是 `JOINED` 團員。
-
-效果：
-
-- participant 狀態改為 `KICKED`。
-- participant `hostNote` 會記錄踢除原因。
-- 合購釋出該團員數量並改回 `OPEN`。
-- `allowRevision` 設為 `false`。
-- 發送 `KICKED` 通知。
-
-### 3.10 團主宣告已面交
-
-- Path: `/api/v1/campaigns/{id}/deliver`
-- Method: `POST`
-- Auth: JWT required
-
-規則：
-
-- 只有團主可以操作。
-- 合購狀態必須是 `OPEN` 或 `FULL`。
-- 至少需要一位 `JOINED` 團員。
-
-效果：
-
-- campaign 狀態改為 `DELIVERED`。
-- 系統會透過 WebSocket 廣播 `CAMPAIGN_STATUS_CHANGED` 到 `/topic/campaigns/{campaignId}`。
-- 廣播 payload 會包含 `type`、`campaignId`、`status`、`message`。
-
-WebSocket 廣播範例：
-
-```json
-{
-  "type": "CAMPAIGN_STATUS_CHANGED",
-  "campaignId": 123,
-  "status": "DELIVERED",
-  "message": "主揪已發起面交"
-}
-```
-
-### 3.11 團員確認收貨
-
-- Path: `/api/v1/campaigns/{id}/confirm`
-- Method: `POST`
-- Auth: JWT required
-
-規則：
-
-- campaign 狀態必須是 `DELIVERED`。
-- 目前使用者必須有該合購的 participant。
-- participant 狀態必須是 `JOINED`。
-
-效果：
-
-- participant 狀態改為 `CONFIRMED`。
-- 如果已無剩餘 `JOINED` 團員，campaign 狀態改為 `COMPLETED`。
-- campaign 完成時寫入 `completedAt`。
-- campaign 完成時發送 `CAMPAIGN_COMPLETED` 通知給團主與所有 `CONFIRMED` 團員。
-
-### 3.12 團主取消開團
-
-- Path: `/api/v1/campaigns/{id}/cancel`
-- Method: `POST`
-- Auth: JWT required
-
-規則：
-
-- 只有團主可以操作。
-- 不允許取消狀態為 `CANCELLED`、`COMPLETED`、`DELIVERED` 的合購。
-
-效果：
-
-- campaign 狀態改為 `CANCELLED`。
-- 如果已有 active `JOINED` 團員，這些 participant 會改為 `CANCELLED`。
-- 如果已有 active `JOINED` 團員，會呼叫 `CreditScoreService.recordScoreChange(...)` 寫入信用分紀錄。
-- 目前程式實際傳入 `scoreChange = 10`，原因為 `取消已有團員的合購單：「{itemName}」`。
-- 如果沒有 active `JOINED` 團員，不會寫入信用分紀錄。
-
-注意：
-
-- 目前 `scoreChange = 10` 代表程式實作是加分紀錄；如果產品規格是取消要扣分，程式應改為 `-10`。
-
-### 3.13 團主標記團員未到場
-
-- Path: `/api/v1/campaigns/{campaignId}/participants/{userId}/no-show`
-- Method: `PUT`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
-
-```json
-{
-  "note": "超過 20 分鐘未到場"
-}
-```
-
-規則：
-
-- 只有團主可以操作。
-- `{userId}` 是使用者 id，不是 participant id。
-- 目標 participant 狀態必須是 `JOINED` 或 `COMPLETED`。
-- `note` 會記錄到 participant `hostNote`。
-
-### 3.14 團員提出爭議
-
-- Path: `/api/v1/campaigns/{campaignId}/dispute`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
-
-```json
-{
-  "reason": "我有到場，但團主誤標未到場"
-}
-```
-
-規則：
-
-- 目前使用者必須有該 campaign 的 participant。
-- participant 狀態必須是 `JOINED` 或 `NO_SHOW`。
-- `reason` optional，未提供時 service 會補預設原因。
-
-效果：
-
-- participant `disputeReason` 記錄爭議原因。
-- 發送 `DISPUTE_RAISED` 通知給團主。
-
-### 3.15 查詢我的信用紀錄（舊路徑，已停用）
-
-- Path: `/api/v1/campaigns/me/credit-logs`
-- Method: `GET`
-- Status: 目前 controller 已註解停用
-
-說明：
-
-- 舊 DTO `CreditLogResponse` 已標記 `@Deprecated`。
-- 前端請改用新版 `/api/v1/credit-scores/me/logs`。
-
-### 3.16 查詢我開的團
-
-- Path: `/api/v1/campaigns/my-hosted`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- Spring `Pageable` 支援的 `page`、`size`、`sort`
-
-Response: `Page<CampaignSummaryResponse>`
-
-### 3.17 查詢我參加的團
-
-- Path: `/api/v1/campaigns/my-joined`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- Spring `Pageable` 支援的 `page`、`size`、`sort`
-
-Response: `Page<CampaignSummaryResponse>`
-
-目前會納入的 participant 狀態：
-
-- `JOINED`
-- `COMPLETED`
-- `DISPUTED`
-- `NO_SHOW`
-- `CONFIRMED`
-
-### 3.18 團主查看團務儀表板
-
-- Path: `/api/v1/campaigns/{id}/host-dashboard`
-- Method: `GET`
-- Auth: JWT required
-
-Response: `HostDashboardResponse`
-
-### 3.19 查詢我在某團的參與資訊
-
-- Path: `/api/v1/campaigns/{id}/participants/me`
-- Method: `GET`
-- Auth: JWT required
-
-Response: `MyParticipationResponse`
+### 團購操作
+
+| Method | Path | Auth | Body | 說明 |
+| --- | --- | --- | --- | --- |
+| `PUT` | `/api/v1/campaigns/{campaignId}/images/order` | Yes | `{"imageUrls":["..."]}` | 調整團購圖片順序 |
+| `PUT` | `/api/v1/campaigns/{id}/host-revise` | Yes | `{"newProductTotalQuantity":36,"newOpenQuantity":20}` | 主揪調整總量與開放數量 |
+| `POST` | `/api/v1/campaigns/{id}/join` | Yes | `{"quantity":2}` | 加入團購 |
+| `POST` | `/api/v1/campaigns/{id}/revise` | Yes | `{"quantity":1}` | 成員修改數量 |
+| `POST` | `/api/v1/campaigns/{id}/withdraw` | Yes | none | 成員退出 |
+| `POST` | `/api/v1/campaigns/{id}/unlock` | Yes | none | 主揪重新開放數量修改 |
+| `POST` | `/api/v1/campaigns/{id}/participants/{participantId}/kick` | Yes | `{"reason":"..."}` | 主揪移除成員 |
+| `POST` | `/api/v1/campaigns/{id}/deliver` | Yes | none | 主揪標記已交付 |
+| `POST` | `/api/v1/campaigns/{id}/confirm` | Yes | none | 成員確認收貨 |
+| `POST` | `/api/v1/campaigns/{id}/cancel` | Yes | none | 主揪取消團購 |
+| `PUT` | `/api/v1/campaigns/{campaignId}/participants/{userId}/no-show` | Yes | `{"note":"..."}` | 主揪標記成員未出現 |
+| `POST` | `/api/v1/campaigns/{campaignId}/dispute` | Yes | `{"reason":"..."}` | 成員提出爭議 |
+
+注意:
+
+- `kick` 路徑中的 `{participantId}` 目前 controller 實際傳入 service 時作為目標使用者 id 使用。
+- `no-show` 路徑中的 `{userId}` 是目標使用者 id，不是 participant id。
+
+### 我的團購資料
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/campaigns/my-hosted` | Yes | `Page<CampaignSummaryResponse>` |
+| `GET` | `/api/v1/campaigns/my-joined` | Yes | `Page<CampaignSummaryResponse>` |
+| `GET` | `/api/v1/campaigns/{id}/host-dashboard` | Yes | `HostDashboardResponse` |
+| `GET` | `/api/v1/campaigns/{id}/participants/me` | Yes | `MyParticipationResponse` |
 
 ## 4. User API
 
-### 4.1 更新個人資料
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `PUT` | `/api/v1/users/me` | Yes | 更新個人資料 |
+| `GET` | `/api/v1/users/{id}/profile` | Yes | 取得使用者公開資料 |
+| `POST` | `/api/v1/users/{id}/block` | Yes | 封鎖使用者 |
+| `DELETE` | `/api/v1/users/{id}/block` | Yes | 解除封鎖 |
+| `GET` | `/api/v1/users/me/blocks?page=0&size=10` | Yes | 取得我的封鎖清單 |
 
-- Path: `/api/v1/users/me`
-- Method: `PUT`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-Request Body:
+更新個人資料 request:
 
 ```json
 {
@@ -632,122 +308,39 @@ Request Body:
 }
 ```
 
-### 4.2 封鎖使用者
+`UserProfileResponse` 主要欄位:
 
-- Path: `/api/v1/users/{id}/block`
-- Method: `POST`
-- Auth: JWT required
-
-### 4.3 解除封鎖使用者
-
-- Path: `/api/v1/users/{id}/block`
-- Method: `DELETE`
-- Auth: JWT required
-
-### 4.4 查詢我的封鎖清單
-
-- Path: `/api/v1/users/me/blocks`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- `page` `int`, optional, default `0`
-- `size` `int`, optional, default `10`
-
-Response: `Page<BlockedUserResponse>`
-
-欄位：
-
-- `userId`: 被封鎖使用者 id
-- `displayName`: 顯示名稱
-- `avatarUrl`: 頭像
-- `blockedAt`: 封鎖時間
-
-### 4.5 取得使用者個人頁
-
-- Path: `/api/v1/users/{id}/profile`
-- Method: `GET`
-- Auth: JWT required
-
-Response: `UserProfileResponse`
-
-欄位：
-
-- `userId`: 使用者 id
-- `displayName`: 顯示名稱
-- `avatarUrl`: 頭像
-- `creditScore`: 目前信用分
-- `noShowCount`: 棄單/未到場次數
-- `totalHostedCount`: 開團總數
-- `hostCancelCount`: 團主取消次數
-- `totalJoinedCount`: 參團總數
-- `participantCancelCount`: 參團者取消次數
-- `joinDate`: 加入時間
-- `activeCampaigns`: 使用者目前進行中的合購清單
+- `userId`
+- `displayName`
+- `avatarUrl`
+- `creditScore`
+- `noShowCount`
+- `totalHostedCount`
+- `hostCancelCount`
+- `totalJoinedCount`
+- `participantCancelCount`
+- `joinDate`
+- `activeCampaigns`
 
 ## 5. Follow API
 
-### 5.1 追蹤團主
-
-- Path: `/api/v1/follows/{hostId}`
-- Method: `POST`
-- Auth: JWT required
-
-Response:
-
-```json
-{
-  "success": true,
-  "message": "follow success"
-}
-```
-
-### 5.2 取消追蹤團主
-
-- Path: `/api/v1/follows/{hostId}`
-- Method: `DELETE`
-- Auth: JWT required
-
-Response:
-
-```json
-{
-  "success": true,
-  "message": "unfollow success"
-}
-```
-
-### 5.3 查詢我的追蹤清單
-
-- Path: `/api/v1/follows/me`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- `page` `int`, optional, default `0`
-- `size` `int`, optional, default `10`
-
-Response: `Page<FollowingUserResponse>`
-
-欄位：
-
-- `hostId`: 被追蹤團主 id
-- `displayName`: 團主顯示名稱
-- `avatarUrl`: 團主頭像
-- `followedAt`: 追蹤時間
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/follows/{hostId}` | Yes | 追蹤主揪 |
+| `DELETE` | `/api/v1/follows/{hostId}` | Yes | 取消追蹤 |
+| `GET` | `/api/v1/follows/me?page=0&size=10` | Yes | 取得我的追蹤清單 |
 
 ## 6. Review API
 
-### 6.1 建立評價
+### 團購評價
 
-- Path: `/api/v1/reviews`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `application/json`
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `POST` | `/api/v1/reviews` | Yes | 建立團購評價 |
+| `GET` | `/api/v1/reviews/check?campaignId=1&revieweeId=2` | Yes | 檢查是否已評價 |
+| `GET` | `/api/v1/reviews/me/received` | Yes | 取得我收到的團購評價 |
 
-Request Body:
+建立評價 request:
 
 ```json
 {
@@ -758,237 +351,64 @@ Request Body:
 }
 ```
 
-規則：
+信用分規則:
 
-- 不可評價自己。
-- `rating` 必須介於 `1` 到 `5`。
-- 同一個 campaign、reviewer、reviewee 不可重複評價。
-- `rating = 5` 目前加 `+1`。
-- `rating = 1` 目前扣 `-3`。
-- `rating = 2 ~ 4` 不調整信用分。
-- 7 天內同 reviewer 對同 reviewee 的有效加分會被防刷限制。
-
-### 6.2 查詢評價狀態
-
-- Path: `/api/v1/reviews/check`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- `campaignId` `Long`, required
-- `revieweeId` `Long`, required
-
-Response: `ReviewStatusResponse`
-
-欄位：
-
-- `isReviewed`: 是否已評價
-- `rating`: 若已評價，回傳評分；未評價時為 `null`
-- `comment`: 若已評價，回傳評語；未評價時為 `null`
-
-### 6.3 查詢我收到的評價
-
-- Path: `/api/v1/reviews/me/received`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- `page` `int`, optional, default `0`
-- `size` `int`, optional, default `10`
-- `sort` Spring Pageable 支援的排序參數，optional
-
-Response: `Page<ReviewResponse>`
-
-用途：
-
-- 查詢「目前登入使用者」作為被評價者時，收到的所有評價紀錄。
-- 適合用在個人頁、信用頁、評價列表頁。
-- 後端會從 JWT 取得目前登入者 id，不需要前端傳 `revieweeId`。
-- 結果依 `createdAt desc` 排序，也就是最新收到的評價在最前面。
-
-Response 欄位：
-
-- `id`: 評價紀錄 id
-- `campaignId`: 關聯合購 id
-- `campaignName`: 關聯合購商品名稱
-- `reviewerId`: 評價者 id
-- `reviewerName`: 評價者顯示名稱
-- `rating`: 評分，範圍 `1 ~ 5`
-- `comment`: 評語內容
-- `isScoreCounted`: 這筆評價是否已納入信用分計算
-- `createdAt`: 評價建立時間
-
-Response 範例：
-
-```json
-{
-  "content": [
-    {
-      "id": 10,
-      "campaignId": 123,
-      "campaignName": "Costco 牛肉分購",
-      "reviewerId": 5,
-      "reviewerName": "A Hui",
-      "rating": 5,
-      "comment": "交易順利，準時面交",
-      "isScoreCounted": true,
-      "createdAt": "2026-04-14T20:30:00"
-    }
-  ],
-  "pageable": {
-    "pageNumber": 0,
-    "pageSize": 10
-  },
-  "totalElements": 1,
-  "totalPages": 1,
-  "last": true,
-  "first": true,
-  "number": 0,
-  "size": 10,
-  "numberOfElements": 1,
-  "empty": false
-}
-```
+- `rating = 5`: 被評價者 `+1`
+- `rating = 1`: 被評價者 `-3`
+- `rating = 2 ~ 4`: 不調整信用分
+- 同一 reviewer 對同一 reviewee 的評價信用分計算有 7 天限制
 
 ## 7. Notification API
 
-### 7.1 查詢未讀通知
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/notifications/unread` | Yes | 取得未讀通知 |
+| `PUT` | `/api/v1/notifications/{id}/read` | Yes | 標記通知為已讀 |
+| `GET` | `/api/v1/notifications/read` | Yes | 取得已讀通知 |
 
-- Path: `/api/v1/notifications/unread`
-- Method: `GET`
-- Auth: JWT required
-
-Response: `List<NotificationResponse>`
-
-說明：
-
-- 回傳目前使用者尚未讀取的通知。
-- 依建立時間新到舊排序。
-
-### 7.2 標記通知已讀
-
-- Path: `/api/v1/notifications/{id}/read`
-- Method: `PUT`
-- Auth: JWT required
-
-Response:
+`NotificationResponse`:
 
 ```json
 {
-  "success": true,
-  "message": "已標記為已讀"
+  "id": 1,
+  "type": "CAMPAIGN_FULL",
+  "referenceId": 123,
+  "content": "通知內容",
+  "createdAt": "2026-06-04T12:00:00"
 }
 ```
 
-說明：
-
-- 只能標記自己的通知。
-- 標記後該通知會從未讀清單移除。
-
-### 7.3 查詢已讀通知
-
-- Path: `/api/v1/notifications/read`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- Spring `Pageable` 支援的 `page`、`size`、`sort`
-- controller 預設 `size = 20`
-
-Response: `Page<NotificationResponse>`
-
-說明：
-
-- 回傳目前使用者已讀通知。
-- 依建立時間新到舊排序。
-- 適合前端通知中心查詢歷史通知紀錄。
-
-目前使用中的通知類型：
-
-- `CAMPAIGN_FULL`: 合購滿單
-- `CAMPAIGN_CANCELLED`: 合購取消
-- `CAMPAIGN_COMPLETED`: 合購完成，可開始互評
-- `MEMBER_WITHDRAW`: 團員退出
-- `KICKED`: 團員被踢除
-- `NO_SHOW_WARNING`: 團員被標記未到場警告
-- `DISPUTE_RAISED`: 團員提出爭議
-
-託購通知 type:
-
-- `PURCHASE_QUOTED`: 跑腿者對託購單報價，通知委託人
-- `PURCHASE_QUOTE_UPDATED`: 跑腿者修改報價，通知委託人
-- `PURCHASE_QUOTE_CANCELLED`: 跑腿者取消報價，通知委託人
-- `PURCHASE_ACCEPTED`: 固定酬金託購單被承接，通知委託人
-- `PURCHASE_QUOTE_ACCEPTED`: 委託人接受報價，通知被選中的跑腿者
-- `PURCHASE_QUOTE_REJECTED`: 委託人接受其他報價，通知未被選中的報價者
-- `PURCHASE_DELIVERED`: 跑腿者標記已交付，通知委託人
-- `PURCHASE_COMPLETED`: 委託人確認完成，通知跑腿者
-- `PURCHASE_CANCELLED`: 委託人取消託購，通知待確認報價者
-
 ## 8. Credit Score API
 
-### 8.1 查詢我的信用分異動紀錄
+`GET /api/v1/credit-scores/me/logs?page=0&size=10`
 
-- Path: `/api/v1/credit-scores/me/logs`
-- Method: `GET`
-- Auth: JWT required
-
-Query Params:
-
-- `page` `int`, optional, default `0`
-- `size` `int`, optional, default `10`
+Auth: required
 
 Response: `Page<CreditScoreLogResponse>`
 
-欄位：
+欄位:
 
-- `id`: 信用分紀錄 id
-- `scoreChange`: 本次分數異動值，例如 `+1`、`-3`、`-10`
-- `reason`: 異動原因
-- `campaignId`: 關聯合購 id，前端可用於跳轉
-- `createdAt`: 紀錄建立時間
+- `id`
+- `scoreChange`
+- `reason`
+- `campaignId`
+- `sourceType`: `CAMPAIGN` / `SYSTEM`
+- `createdAt`
 
-說明：
+## 9. Chat API
 
-- 依 `createdAt desc` 排序。
-- 讀取資料表 `credit_score_logs`。
-- `CreditLogResponse` 已標記 deprecated，前端請改用 `CreditScoreLogResponse`。
+### REST
 
-Credit score log source fields:
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/campaigns/{campaignId}/chat-messages` | Yes | 取得團購聊天室歷史訊息 |
+| `POST` | `/api/v1/files/upload` | Yes | 上傳聊天室圖片 |
 
-- `campaignId`: 合購來源 id，非合購來源時為 null
-- `purchaseRequestId`: 託購來源 id，非託購來源時為 null
-- `sourceType`: `CAMPAIGN` / `PURCHASE_REQUEST` / `SYSTEM`
+上傳圖片 request:
 
-## 9. Chat REST API
-
-### 9.1 取得聊天室歷史訊息
-
-- Path: `/api/v1/campaigns/{campaignId}/chat-messages`
-- Method: `GET`
-- Auth: JWT required
-
-Response: `List<ChatMessageResponse>`
-
-說明：
-
-- 查詢指定合購聊天室歷史訊息。
-- WebSocket 即時訊息仍由 STOMP channel 傳送。
-
-### 9.2 上傳聊天室圖片
-
-- Path: `/api/v1/files/upload`
-- Method: `POST`
-- Auth: JWT required
 - Content-Type: `multipart/form-data`
-
-Request Form Fields:
-
-- `files` `List<MultipartFile>`, required，要上傳的圖片檔，可一次上傳多張。
-- `campaignId` `Long`, optional，聊天室所屬的合購 id。
+- `files`: required, `List<MultipartFile>`
+- `campaignId`: optional
 
 Response:
 
@@ -996,281 +416,22 @@ Response:
 {
   "success": true,
   "urls": [
-    "/uploads/campaigns/123/550e8400-e29b-41d4-a716-446655440000.jpg",
-    "/uploads/campaigns/123/7c9e6679-7425-40de-944b-e07fc1f90ae7.png"
+    "/uploads/campaigns/123/example.jpg"
   ]
 }
 ```
 
-說明：
-
-- 此 API 提供聊天室先批次上傳圖片使用。
-- 有帶 `campaignId` 時，檔案會存到 `uploads/campaigns/{campaignId}/`。
-- 未帶 `campaignId` 時，檔案會存到 `uploads/general/`。
-- 檔名會改成 UUID，副檔名沿用原始檔案副檔名。
-- 空檔案會被略過，不會出現在回傳的 `urls` 內。
-- `Content-Type` 為 `image/*` 的檔案會壓縮為最大寬高 `1280x1280`、輸出品質 `0.75`。
-- 非圖片檔案目前會直接原檔儲存。
-- 前端取得 `urls` 後，可將圖片網址放進聊天室訊息內容，再透過 STOMP 發送到 `/app/chat/{campaignId}/sendMessage`。
-
-## 11. Purchase Request API
-
-託購功能使用 `/api/v1/purchase-requests`，圖片沿用合購圖片目錄，回傳圖片網址格式為 `/images/{fileName}`。
-
-`purchase_request.status`:
-
-- `OPEN`: 開放中，可承接或報價
-- `ASSIGNED`: 已成立，已有跑腿者
-- `DELIVERED`: 跑腿者已標記交付
-- `COMPLETED`: 委託人已確認完成
-- `CANCELLED`: 委託人已取消
-
-`purchase_request.rewardType`:
-
-- `FIXED`: 固定酬金，跑腿者可直接承接
-- `QUOTE`: 跑腿者報價，委託人接受報價後成立
-
-`purchase_request_quote.status`:
-
-- `PENDING`: 等待委託人確認
-- `ACCEPTED`: 已接受
-- `REJECTED`: 已拒絕
-- `CANCELLED`: 報價者取消
-
-### 11.1 查詢目前託購單
-
-- Path: `/api/v1/purchase-requests`
-- Method: `GET`
-- Auth: 不需登入
-
-Query Params:
-
-- `keyword` `String`, optional，商品名稱關鍵字
-- `rewardType` `String`, optional，`FIXED` 或 `QUOTE`
-- `deliveryMethod` `String`, optional，`FACE_TO_FACE` / `STORE_TO_STORE` / `HOME_DELIVERY`
-- `requestArea` `String`, optional，委託地區
-- `status` `String`, optional，不傳時預設只查 `OPEN` 且未過期資料
-- `page` `int`, optional, default `0`
-- `size` `int`, optional, default `10`
-
-Response: `Page<PurchaseRequestResponse>`
-
-```json
-{
-  "content": [
-    {
-      "id": 12,
-      "productName": "柯克蘭衛生紙",
-      "imageUrls": ["http://localhost:8080/images/xxx.jpg"],
-      "rewardType": "FIXED",
-      "fixedRewardAmount": 100,
-      "quoteCount": 0,
-      "deliveryMethod": "FACE_TO_FACE",
-      "requestArea": "台北中山區",
-      "deadlineAt": "2026-05-30T23:59:59",
-      "minCreditScore": 80,
-      "status": "OPEN",
-      "requester": {
-        "id": 3,
-        "displayName": "王曉明",
-        "profileImageUrl": "...",
-        "creditScore": 92
-      },
-      "canQuote": false,
-      "canAcceptDirectly": true,
-      "canEdit": false,
-      "actBlockedReason": null
-    }
-  ],
-  "totalElements": 1,
-  "totalPages": 1
-}
-```
-
-### 11.2 查詢託購單詳情
-
-- Path: `/api/v1/purchase-requests/{requestId}`
-- Method: `GET`
-- Auth: 不需登入
-
-Response: `PurchaseRequestResponse`
-
-### 11.3 建立託購單
-
-- Path: `/api/v1/purchase-requests`
-- Method: `POST`
-- Auth: JWT required
-- Content-Type: `multipart/form-data`
-
-Request Form Fields:
-
-- `productName` `String`, required
-- `rewardType` `String`, required，`FIXED` 或 `QUOTE`
-- `fixedRewardAmount` `BigDecimal`, `rewardType=FIXED` 時 required
-- `deliveryMethod` `String`, required，`FACE_TO_FACE` / `STORE_TO_STORE` / `HOME_DELIVERY`
-- `requestArea` `String`, optional
-- `deadlineAt` `LocalDateTime`, optional，空值代表無期限
-- `deliveryTimeType` `String`, optional，`SPECIFIED` 或 `DISCUSS`
-- `deliveryTimeNote` `String`, optional
-- `minCreditScore` `Integer`, optional，空值代表不限信用分
-- `description` `String`, optional
-- `images` `List<MultipartFile>`, optional，最多 3 張
-
-Response: `PurchaseRequestResponse`
-
-### 11.4 編輯託購單
-
-- Path: `/api/v1/purchase-requests/{requestId}`
-- Method: `PUT`
-- Auth: JWT required
-- Content-Type: `application/json`
-
-限制:
-
-- 只有委託人可編輯
-- 只有 `OPEN` 狀態可編輯
-- 已有人報價時不能切換 `rewardType`
-
-### 11.5 託購單圖片
-
-- `POST /api/v1/purchase-requests/{requestId}/images`: 新增圖片，`multipart/form-data`，field `images`
-- `PUT /api/v1/purchase-requests/{requestId}/images/order`: 調整圖片排序，body `{"imageUrls":["image-b.jpg","image-a.jpg"]}`
-- `DELETE /api/v1/purchase-requests/{requestId}/images/{fileName}`: 刪除圖片
-
-### 11.6 固定酬金承接
-
-- Path: `/api/v1/purchase-requests/{requestId}/accept`
-- Method: `POST`
-- Auth: JWT required
-
-限制:
-
-- 只適用 `rewardType=FIXED`
-- 跑腿者不能是委託人
-- 託購單必須是 `OPEN`
-- 跑腿者信用分必須符合 `minCreditScore`
-
-效果:
-
-- `assignedRunner` 設為目前使用者
-- `status` 改為 `ASSIGNED`
-
-### 11.7 跑腿者報價
-
-- `POST /api/v1/purchase-requests/{requestId}/quotes`: 建立報價，body `{"quoteAmount":120,"note":"週末可以面交"}`
-- `PUT /api/v1/purchase-requests/{requestId}/quotes/{quoteId}`: 編輯自己的待確認報價
-- `POST /api/v1/purchase-requests/{requestId}/quotes/{quoteId}/cancel`: 取消自己的待確認報價
-- `GET /api/v1/purchase-requests/{requestId}/quotes`: 委託人查詢完整報價列表
-- `GET /api/v1/purchase-requests/{requestId}/quotes/me`: 跑腿者查詢自己的報價
-
-### 11.8 接受報價並成立
-
-- Path: `/api/v1/purchase-requests/{requestId}/quotes/{quoteId}/accept`
-- Method: `POST`
-- Auth: JWT required
-
-效果:
-
-- 指定報價改為 `ACCEPTED`
-- 其他待確認報價改為 `REJECTED`
-- `assignedRunner` 設為報價者
-- `acceptedQuoteId` 設為該報價
-- `status` 改為 `ASSIGNED`
-
-### 11.9 交付與完成
-
-- `POST /api/v1/purchase-requests/{requestId}/deliver`: 跑腿者標記已交付，狀態改為 `DELIVERED`
-- `POST /api/v1/purchase-requests/{requestId}/complete`: 委託人確認完成，狀態改為 `COMPLETED`
-
-### 11.10 取消託購
-
-### 11.10 託購評價
-
-- Path: `/api/v1/purchase-requests/{requestId}/reviews`
-- Method: `POST`
-- Auth: JWT required
-
-Request Body:
-
-```json
-{
-  "rating": 5,
-  "comment": "溝通順利"
-}
-```
-
-限制:
-
-- 託購單必須是 `COMPLETED`
-- 只有委託人和承接跑腿者可以互評
-- 委託人只能評價 `assignedRunner`
-- 跑腿者只能評價 `requester`
-- 同一張託購單、同一評價方向只能評一次
-
-信用分規則:
-
-- `5` 星: `+1`
-- `1` 星: `-3`
-- 同一 reviewer 對同一 reviewee 的正評，7 天內只計分一次
-- 託購評價與合購評價共用同一個 `users.credit_score`
-- 託購評價造成的信用分紀錄會寫入 `credit_score_logs.purchase_request_id`
-
-查詢我對這張託購單是否已評價:
-
-- Path: `/api/v1/purchase-requests/{requestId}/reviews/status`
-- Method: `GET`
-- Auth: JWT required
-
-查詢我收到的託購評價:
-
-- Path: `/api/v1/purchase-requests/me/received-reviews`
-- Method: `GET`
-- Auth: JWT required
-- Response: `Page<PurchaseRequestReviewResponse>`
-
-### 11.11 取消託購
-
-- Path: `/api/v1/purchase-requests/{requestId}/cancel`
-- Method: `POST`
-- Auth: JWT required
-
-```json
-{
-  "reason": "暫時不需要了"
-}
-```
-
-限制:
-
-- 只有委託人可取消
-- 第一版只允許 `OPEN` 狀態取消
-
-### 11.11 我的託購
-
-- `GET /api/v1/purchase-requests/my-created`: 我發起的託購
-- `GET /api/v1/purchase-requests/my-assigned`: 我承接的託購
-- `GET /api/v1/purchase-requests/my-quotes`: 我報價過的託購
-
-## 12. WebSocket / STOMP
-
-### 10.1 連線資訊
+### WebSocket/STOMP
 
 - Endpoint: `/ws`
-- SockJS: supported
-- Application Destination Prefix: `/app`
-- Broker Prefix: `/topic`, `/queue`
-- User Destination Prefix: `/user`
+- Application destination prefix: `/app`
+- Broker prefix: `/topic`, `/queue`
+- User destination prefix: `/user`
 
-STOMP `CONNECT` header:
+送出聊天室訊息:
 
-```http
-Authorization: Bearer <JWT_TOKEN>
-```
-
-### 10.2 發送聊天室訊息
-
-- Client Send To: `/app/chat/{campaignId}/sendMessage`
-- Server Broadcast To: `/topic/campaigns/{campaignId}`
+- Client send: `/app/chat/{campaignId}/sendMessage`
+- Server broadcast: `/topic/campaigns/{campaignId}`
 
 Payload:
 
@@ -1280,43 +441,875 @@ Payload:
 }
 ```
 
-聊天室訂閱規則：
+Response payload:
 
-- 訂閱 `/topic/campaigns/{campaignId}` 時，必須是該 campaign 的團主，或是允許狀態中的參與者。
-- 允許參與者狀態包含 `JOINED`、`CONFIRMED`、`DISPUTED`、`NO_SHOW`。
-- `CANCELLED` campaign 不允許訂閱。
-- `COMPLETED` campaign 在 `completedAt` 後保留 3 天聊天室權限，超過後不允許訂閱。
+```json
+{
+  "senderId": 1,
+  "avatarUrl": "https://...",
+  "senderName": "A Hui",
+  "content": "hello",
+  "timestamp": "2026-06-04T12:00:00"
+}
+```
 
-### 10.3 接收個人通知
+私人通知訂閱:
 
 - Subscribe: `/user/queue/notifications`
 
-Payload:
-
-```json
-{
-  "content": "notification content",
-  "type": "CAMPAIGN_FULL",
-  "referenceId": 123
-}
-```
-
-### 10.4 接收合購狀態變更廣播
+團購狀態訂閱:
 
 - Subscribe: `/topic/campaigns/{campaignId}`
 
-Payload:
+## 10. User Delivery Profile API
+
+常用交付資料是使用者模板。建立委託單時會複製成快照，因此後續修改或刪除模板不會影響既有委託單。
+
+### 取得我的常用交付資料
+
+`GET /api/v1/user-delivery-profiles`
+
+Auth: required
+
+Query params:
+
+- `profileType`: optional，`FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE`
+
+Response: `200 OK`
+
+```json
+[
+  {
+    "id": 1,
+    "profileType": "FACE_TO_FACE",
+    "locationType": "TRANSIT_RANGE",
+    "label": "常用捷運面交",
+    "city": "台北市",
+    "district": null,
+    "locationName": "板南線",
+    "rangeStart": "府中",
+    "rangeEnd": "市政府",
+    "displayText": "板南線 府中～市政府",
+    "detail": {
+      "transitSystem": "TAIPEI_MRT"
+    },
+    "isDefault": false,
+    "createdAt": "2026-07-03T12:00:00",
+    "updatedAt": "2026-07-03T12:00:00"
+  }
+]
+```
+
+### 新增常用交付資料
+
+`POST /api/v1/user-delivery-profiles`
+
+Auth: required
+
+Request:
 
 ```json
 {
-  "type": "CAMPAIGN_STATUS_CHANGED",
-  "campaignId": 123,
-  "status": "DELIVERED",
-  "message": "主揪已發起面交"
+  "profileType": "FACE_TO_FACE",
+  "locationType": "TRANSIT_RANGE",
+  "label": "常用捷運面交",
+  "city": "台北市",
+  "district": null,
+  "locationName": "板南線",
+  "rangeStart": "府中",
+  "rangeEnd": "市政府",
+  "displayText": "板南線 府中～市政府",
+  "detail": {
+    "transitSystem": "TAIPEI_MRT"
+  },
+  "isDefault": false
 }
 ```
 
-說明：
+Response: `201 Created`，body 為完整 `UserDeliveryProfileResponse`。
 
-- 目前團主呼叫 `POST /api/v1/campaigns/{id}/deliver` 時，會廣播此事件。
-- 前端可用此事件即時更新聊天室內的合購狀態提示。
+驗證規則:
+
+- `profileType`、`locationType`、`displayText` 必填。
+- enum 值必須符合本文件「Purchase request enum values」。
+
+### 修改常用交付資料
+
+`PUT /api/v1/user-delivery-profiles/{id}`
+
+Auth: required
+
+Request 格式與新增相同。只有資料擁有者可以修改。
+
+Response: `200 OK`，body 為更新後的 `UserDeliveryProfileResponse`。
+
+### 刪除常用交付資料
+
+`DELETE /api/v1/user-delivery-profiles/{id}`
+
+Auth: required
+
+只有資料擁有者可以刪除。已建立委託單保存的是快照，不受此操作影響。
+
+Response: `204 No Content`
+
+## 11. Purchase Request API
+
+### 建立委託單
+
+`POST /api/v1/purchase-requests`
+
+Auth: required
+
+面交 Request:
+
+```json
+{
+  "itemName": "莓姬梅酒",
+  "itemDescription": "希望購買草莓口味",
+  "imageUrls": ["item1.jpg", "item2.jpg"],
+  "rewardType": "FIXED",
+  "fixedRewardAmount": 100,
+  "requesterCity": "台北市",
+  "requesterDistrict": "中山區",
+  "deliveryMethod": "FACE_TO_FACE",
+  "deliveryPublicSummary": "板南線 府中～市政府、台北車站",
+  "requestExpireTime": "2026-07-10T23:59:59",
+  "deliveryDeadlineHours": 72,
+  "minCreditScore": 80,
+  "selectedProfileIds": [1, 2],
+  "manualMeetupRanges": [
+    {
+      "locationType": "LANDMARK",
+      "city": "台北市",
+      "district": "中正區",
+      "locationName": "台北車站",
+      "rangeStart": null,
+      "rangeEnd": null,
+      "displayText": "台北車站",
+      "detail": {},
+      "latitude": null,
+      "longitude": null
+    }
+  ],
+  "saveManualToProfile": true,
+  "saveDeliveryToProfile": false
+}
+```
+
+宅配或店到店時須提供 `deliveryPrivateDetail`，例如:
+
+```json
+{
+  "deliveryMethod": "HOME_DELIVERY",
+  "deliveryPublicSummary": "宅配：台北市中山區",
+  "deliveryPrivateDetail": {
+    "receiverName": "王小明",
+    "receiverPhone": "0912345678",
+    "city": "台北市",
+    "district": "中山區",
+    "addressDetail": "中山路 2 段 185 號 2 樓"
+  },
+  "saveDeliveryToProfile": true
+}
+```
+
+上例只列交付相關欄位，實際 request 仍須包含商品、酬金與期限等必填欄位。
+
+Response: `201 Created`
+
+```json
+{
+  "id": 1001
+}
+```
+
+主要驗證規則:
+
+- `itemName`、`rewardType`、`requesterCity`、`deliveryMethod`、`deliveryPublicSummary` 必填。
+- `FIXED` 模式的 `fixedRewardAmount` 必須大於 `0`；`QUOTE` 模式會忽略固定酬金。
+- `requestExpireTime` 必須是未來時間。
+- `deliveryDeadlineHours` 必須大於 `0`，`minCreditScore` 不可小於 `0`。
+- 面交至少需要一筆 `selectedProfileIds` 或 `manualMeetupRanges`。
+- 宅配及店到店必須提供非空的 `deliveryPrivateDetail`。
+- 選取的常用面交資料必須屬於目前登入者，且 `profileType` 必須是 `FACE_TO_FACE`。
+
+### 取得委託單列表
+
+`GET /api/v1/purchase-requests`
+
+Auth: not required
+
+Query params:
+
+- `status`: optional；未指定時只查未過期的 `OPEN`、`QUOTING`
+- `city`: optional
+- `district`: optional
+- `deliveryMethod`: optional
+- `rewardType`: optional
+- `keyword`: optional，同時搜尋商品名稱與說明
+- `page`: optional，default `0`
+- `size`: optional，default `20`，範圍 `1` 到 `100`
+
+Response: `200 OK`，`Page<PurchaseRequestSummaryResponse>`
+
+```json
+{
+  "content": [
+    {
+      "id": 1001,
+      "requesterId": 1,
+      "requesterDisplayName": "A Hui",
+      "itemName": "莓姬梅酒",
+      "imageUrls": ["item1.jpg"],
+      "rewardType": "FIXED",
+      "fixedRewardAmount": 100,
+      "requesterCity": "台北市",
+      "requesterDistrict": "中山區",
+      "deliveryMethod": "FACE_TO_FACE",
+      "deliveryPublicSummary": "板南線 府中～市政府、台北車站",
+      "requestExpireTime": "2026-07-10T23:59:59",
+      "deliveryDeadlineHours": 72,
+      "minCreditScore": 80,
+      "status": "OPEN",
+      "createdAt": "2026-07-03T12:00:00"
+    }
+  ],
+  "totalElements": 1,
+  "totalPages": 1,
+  "size": 20,
+  "number": 0
+}
+```
+
+列表不回傳 `deliveryPrivateDetail`。
+
+### 取得委託單詳情
+
+`GET /api/v1/purchase-requests/{id}`
+
+Auth: not required；登入後若為已成立訂單的交易雙方，可取得私密交付資料。
+
+Response: `200 OK`
+
+```json
+{
+  "id": 1001,
+  "requesterId": 1,
+  "requesterDisplayName": "A Hui",
+  "requesterProfileImageUrl": "https://...",
+  "requesterCreditScore": 100,
+  "itemName": "莓姬梅酒",
+  "itemDescription": "希望購買草莓口味",
+  "imageUrls": ["item1.jpg"],
+  "rewardType": "FIXED",
+  "fixedRewardAmount": 100,
+  "requesterCity": "台北市",
+  "requesterDistrict": "中山區",
+  "deliveryMethod": "FACE_TO_FACE",
+  "deliveryPublicSummary": "板南線 府中～市政府、台北車站",
+  "deliveryPrivateDetail": null,
+  "meetupRanges": [
+    {
+      "id": 1,
+      "sourceProfileId": 1,
+      "locationType": "TRANSIT_RANGE",
+      "city": "台北市",
+      "district": null,
+      "locationName": "板南線",
+      "rangeStart": "府中",
+      "rangeEnd": "市政府",
+      "displayText": "板南線 府中～市政府",
+      "detail": {},
+      "latitude": null,
+      "longitude": null
+    }
+  ],
+  "requestExpireTime": "2026-07-10T23:59:59",
+  "deliveryDeadlineHours": 72,
+  "minCreditScore": 80,
+  "status": "OPEN",
+  "reopenCount": 0,
+  "cancelledAt": null,
+  "expiredAt": null,
+  "createdAt": "2026-07-03T12:00:00",
+  "updatedAt": "2026-07-03T12:00:00"
+}
+```
+
+`deliveryPrivateDetail` 可見條件:
+
+- 委託單已產生 `purchase_orders`。
+- 目前登入者是該訂單的委託人或接單人。
+- 未登入、非交易雙方或尚未成立訂單時固定回傳 `null`。
+
+### 修改委託單
+
+`PUT /api/v1/purchase-requests/{id}`
+
+Auth: required，只有委託人可操作。
+
+Request 使用部分更新語意，只需傳入要修改的欄位:
+
+```json
+{
+  "itemName": "更新後商品名稱",
+  "requestExpireTime": "2026-07-15T23:59:59",
+  "deliveryDeadlineHours": 96,
+  "selectedProfileIds": [1],
+  "manualMeetupRanges": []
+}
+```
+
+規則:
+
+- `ORDERED`、`EXPIRED`、`CANCELLED` 不可修改。
+- `OPEN` 且沒有有效報價時，可修改商品、酬金、交付方式、交付資料與期限。
+- `QUOTING` 或已有 `ACTIVE` 報價時，只能傳入較晚的 `requestExpireTime`。
+- 傳入 `selectedProfileIds` 或 `manualMeetupRanges` 時會重建面交快照。
+- 改成宅配或店到店時必須提供 `deliveryPrivateDetail`。
+
+Response: `200 OK`，body 為更新後的 `PurchaseRequestDetailResponse`。此操作的 response 不揭露私密交付資料。
+
+### 取消委託單
+
+`POST /api/v1/purchase-requests/{id}/cancel`
+
+Auth: required，只有委託人可操作。
+
+規則:
+
+- 只有 `OPEN`、`QUOTING` 可以取消。
+- 委託單改為 `CANCELLED` 並記錄取消時間。
+- 所有 `ACTIVE` 報價改為 `EXPIRED`。
+- 此操作不扣信用分。
+
+Response: `204 No Content`
+
+### 延長委託期限
+
+`PATCH /api/v1/purchase-requests/{id}/extend`
+
+Auth: required，只有委託人可操作。
+
+Request:
+
+```json
+{
+  "requestExpireTime": "2026-07-15T23:59:59"
+}
+```
+
+規則:
+
+- 委託單必須是 `OPEN` 或 `QUOTING`。
+- 新期限必須是未來時間且晚於原期限。
+
+Response: `200 OK`，body 為更新後的 `PurchaseRequestDetailResponse`。
+
+### 提出報價
+
+`POST /api/v1/purchase-requests/{id}/quotes`
+
+Auth: required
+
+Request:
+
+```json
+{
+  "quoteAmount": 150,
+  "quoteNote": "明天下午可以協助購買"
+}
+```
+
+規則:
+
+- 只有 `QUOTE` 委託可報價，委託狀態必須是 `OPEN` 或 `QUOTING` 且尚未過期。
+- 報價者不可是委託人，信用分須達門檻，雙方不可存在封鎖關係。
+- 同一使用者對同一委託只能建立一筆報價；撤回後不可建立第二筆。
+- 第一筆有效報價成立時，委託單狀態改為 `QUOTING`。
+
+Response: `201 Created`，body 為 `PurchaseQuoteResponse`。
+
+### 取得委託單報價列表
+
+`GET /api/v1/purchase-requests/{id}/quotes`
+
+Auth: required，只有委託人可查看完整列表。
+
+Response: `200 OK`，body 為 `PurchaseQuoteResponse[]`。
+
+### 取得我的報價
+
+`GET /api/v1/purchase-quotes/me?page=0&size=20`
+
+Auth: required
+
+Response: `200 OK`，`Page<PurchaseQuoteResponse>`。
+
+`PurchaseQuoteResponse` 範例:
+
+```json
+{
+  "id": 2001,
+  "purchaseRequestId": 1001,
+  "itemName": "莓姬梅酒",
+  "quoterId": 2,
+  "quoterDisplayName": "Runner",
+  "quoterProfileImageUrl": "https://...",
+  "quoterCreditScore": 100,
+  "quoteAmount": 150,
+  "quoteNote": "明天下午可以協助購買",
+  "status": "ACTIVE",
+  "selectedAt": null,
+  "withdrawnAt": null,
+  "createdAt": "2026-07-03T12:00:00",
+  "updatedAt": "2026-07-03T12:00:00"
+}
+```
+
+### 修改自己的報價
+
+`PUT /api/v1/purchase-quotes/{quoteId}`
+
+Auth: required
+
+Request 格式與提出報價相同。
+
+規則:
+
+- 只有報價者本人可修改。
+- 報價與委託單都必須仍處於可報價狀態。
+
+Response: `200 OK`，body 為更新後的 `PurchaseQuoteResponse`。
+
+### 撤回自己的報價
+
+`POST /api/v1/purchase-quotes/{quoteId}/withdraw`
+
+Auth: required
+
+只有報價者本人可撤回 `ACTIVE` 報價。最後一筆有效報價撤回後，`QUOTING` 委託會恢復為 `OPEN`。
+
+Response: `200 OK`，body 為更新後的 `PurchaseQuoteResponse`。
+
+### 選定報價並成立訂單
+
+`POST /api/v1/purchase-quotes/{quoteId}/select`
+
+Auth: required，只有委託人可操作。
+
+此操作會以資料庫交易鎖定委託單，重新檢查期限、信用分、封鎖關係與報價狀態，避免同時成立多筆訂單。
+
+成功後:
+
+- 委託單改為 `ORDERED`。
+- 選中報價改為 `SELECTED`，其他有效報價改為 `NOT_SELECTED`。
+- 建立狀態為 `WAITING_CONFIRMATION` 的 `purchase_orders`。
+- 寫入 `ORDER_CREATED_FROM_QUOTE` 訂單事件並通知報價者。
+
+Response: `201 Created`，body 為 `PurchaseOrderResponse`。
+
+### 固定酬金直接承接
+
+`POST /api/v1/purchase-requests/{id}/accept`
+
+Auth: required
+
+規則:
+
+- 委託必須是尚未過期的 `FIXED`、`OPEN` 委託。
+- 接單人不可是委託人，信用分須達門檻，雙方不可存在封鎖關係。
+- 使用交易鎖避免多人同時承接。
+
+成功後建立 `WAITING_CONFIRMATION` 訂單、將委託改為 `ORDERED`，並寫入 `ORDER_CREATED_BY_ACCEPT` 事件。
+
+Response: `201 Created`
+
+```json
+{
+  "id": 3001,
+  "purchaseRequestId": 1001,
+  "itemName": "莓姬梅酒",
+  "requesterId": 1,
+  "requesterDisplayName": "A Hui",
+  "runnerId": 2,
+  "runnerDisplayName": "Runner",
+  "selectedQuoteId": null,
+  "status": "WAITING_CONFIRMATION",
+  "createdAt": "2026-07-03T12:00:00",
+  "updatedAt": "2026-07-03T12:00:00"
+}
+```
+
+訂單成立時會同步建立託購聊天室，response 會回傳 `chatRoomId`。
+
+### 取得我的發起列表
+
+`GET /api/v1/purchase-requests/my-created?status=OPEN&page=0&size=20`
+
+Auth: required
+
+- `status`: optional
+- `page`: default `0`
+- `size`: default `20`，範圍 `1` 到 `100`
+
+Response: `200 OK`，`Page<PurchaseRequestSummaryResponse>`。
+
+## 12. Purchase Order API
+
+### 取得我的託購訂單列表
+
+`GET /api/v1/purchase-orders`
+
+Auth: required
+
+Query params:
+
+- `role`: required，`REQUESTER` / `RUNNER`
+- `status`: optional，參考 Purchase order status
+- `page`: default `0`
+- `size`: default `20`，範圍 `1` 到 `100`
+
+Response: `200 OK`，`Page<PurchaseOrderSummaryResponse>`。
+
+列表包含商品摘要、交易雙方、交付方式、酬金、訂單狀態與依成立時間計算的 `deliveryDeadlineAt`。
+
+### 取得訂單詳情
+
+`GET /api/v1/purchase-orders/{orderId}`
+
+Auth: required，只有委託人與接單人可讀取。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`，主要欄位:
+
+- 委託商品、圖片與交易雙方
+- 固定酬金或得標報價金額
+- `deliveryPrivateDetail` 與面交範圍快照
+- 雙方確認、開始、寄出、交貨、完成與取消時間
+- 物流公司、單號與查詢網址
+- 歸責使用者與信用扣分
+- `deliveryDeadlineAt`
+- 異常提出者、被提出者、異常類型與提出／回應時間
+- `availableActions`: `CONFIRM` / `START` / `SHIP` / `DELIVER` / `COMPLETE` / `CANCEL` / `REPORT_ABNORMAL` / `RESPOND_ABNORMAL`
+
+### 委託人確認交易
+
+`POST /api/v1/purchase-orders/{orderId}/confirm/requester`
+
+Auth: required，只有委託人可操作。
+
+- 訂單必須是 `WAITING_CONFIRMATION`。
+- 重複確認採冪等處理，直接回傳目前訂單。
+- 接單人也已確認時，訂單改為 `CONFIRMED`。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 提出訂單異常
+
+`POST /api/v1/purchase-orders/{orderId}/abnormal/report`
+
+Auth: required，委託人或接單人皆可提出。
+
+Request:
+
+```json
+{
+  "abnormalType": "RUNNER_NOT_DELIVERED",
+  "description": "超過約定時間仍未收到商品",
+  "imageUrls": ["evidence.jpg"]
+}
+```
+
+允許的異常類型:
+
+- `REQUESTER_NO_SHOW`
+- `RUNNER_NO_SHOW`
+- `RUNNER_NOT_DELIVERED`
+- `REQUESTER_UNREACHABLE`
+- `ITEM_NOT_RECEIVED`
+- `OTHER`
+
+規則:
+
+- 訂單必須是 `IN_PROGRESS`、`SHIPPED` 或 `DELIVERED_PENDING_CONFIRM`。
+- 系統自動將交易對方設為 `abnormalReportedUser`。
+- 訂單改為 `ABNORMAL_PENDING_RESPONSE`。
+- 說明與證據圖片寫入 `ABNORMAL_REPORTED` 事件。
+- 被提出異常者必須在 12 小時內回應。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 回應訂單異常
+
+`POST /api/v1/purchase-orders/{orderId}/abnormal/respond`
+
+Auth: required，只有 `abnormalReportedUser` 可以回應。
+
+Request:
+
+```json
+{
+  "responseText": "我有依照約定完成交付",
+  "imageUrls": ["delivery-proof.jpg"]
+}
+```
+
+規則:
+
+- 訂單必須是 `ABNORMAL_PENDING_RESPONSE`。
+- 回應時間必須早於提出時間加 12 小時。
+- 成功回應後改為 `DISPUTE_CLOSED_NO_PENALTY`。
+- 第一階段無人工仲裁，有回應即不扣任何一方信用分。
+- 回應內容與圖片寫入 `ABNORMAL_RESPONDED_NO_PENALTY` 事件。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 查詢訂單事件
+
+`GET /api/v1/purchase-orders/{orderId}/events`
+
+Auth: required，只有訂單交易雙方可查詢。
+
+Response: `200 OK`，`PurchaseOrderEventResponse[]`，依建立時間由舊到新排序。
+
+```json
+[
+  {
+    "id": 1,
+    "orderId": 3001,
+    "actorId": 1,
+    "actorDisplayName": "A Hui",
+    "eventType": "ABNORMAL_REPORTED",
+    "fromStatus": "IN_PROGRESS",
+    "toStatus": "ABNORMAL_PENDING_RESPONSE",
+    "description": "超過約定時間仍未收到商品",
+    "metadata": {
+      "abnormalType": "RUNNER_NOT_DELIVERED",
+      "imageUrls": ["evidence.jpg"]
+    },
+    "createdAt": "2026-07-03T12:00:00"
+  }
+]
+```
+
+### 異常逾時自動扣分
+
+排程名稱：`checkPurchaseOrderAbnormalTimeout`
+
+- 每分鐘檢查一次。
+- 條件為 `ABNORMAL_PENDING_RESPONSE`、提出超過 12 小時且尚未回應。
+- 取得訂單排他鎖後會重新驗證，避免覆蓋期限邊界送出的回應。
+- 對 `abnormalReportedUser` 扣 `10` 分。
+- 訂單改為 `PENALIZED_CANCELLED`，並設定歸責使用者與取消時間。
+- 寫入 `ABNORMAL_TIMEOUT_PENALIZED` 事件並通知交易雙方。
+
+## 13. Purchase Chat API
+
+- `GET /api/v1/purchase-chat-rooms`: 我的聊天室清單，包含對方、最後訊息、未讀數與唯讀狀態。
+- `GET /api/v1/purchase-chat-rooms/unread-count`: 所有託購聊天室未讀總數。
+- `POST /api/v1/purchase-chat-rooms/{roomId}/read`: 將聊天室標記已讀，response `204`。
+- `POST /api/v1/purchase-chat-rooms/{roomId}/messages`: 發送文字或圖片 URL。
+- `GET /api/v1/purchase-orders/{orderId}/messages`: 訂單聊天室歷史訊息。
+- `POST /api/v1/purchase-orders/{orderId}/messages`: 發送文字訊息。
+- `POST /api/v1/purchase-orders/{orderId}/messages/images`: 發送圖片 URL 訊息。
+
+發送 request:
+
+```json
+{
+  "messageType": "TEXT",
+  "content": "明天下午會去購買"
+}
+```
+
+聊天室只允許訂單委託人與接單人存取。訂單完成或取消後保留 3 天可寫入，之後轉為唯讀。
+
+WebSocket/STOMP:
+
+- Send: `/app/chat/rooms/{chatRoomId}/sendMessage`
+- Subscribe: `/topic/chat/rooms/{chatRoomId}`
+- Payload 使用既有 `ChatMessageRequest` 的 `content` 欄位。
+- 訂閱與發送都會檢查聊天室成員權限。
+
+## 14. Purchase Request Image API
+
+- `POST /api/v1/purchase-requests/{id}/images`: `multipart/form-data`，欄位 `images`，最多 5 張。
+- `DELETE /api/v1/purchase-requests/{id}/images/{fileName}`: 刪除單張圖片。
+- `PUT /api/v1/purchase-requests/{id}/images/order`: 更新圖片排序。
+
+排序 request:
+
+```json
+{
+  "imageUrls": [
+    "/uploads/purchase-requests/1001/a.jpg",
+    "/uploads/purchase-requests/1001/b.jpg"
+  ]
+}
+```
+
+只有委託人可管理圖片，且委託必須是沒有有效報價的 `OPEN` 狀態。圖片只允許 image content type。
+
+## 15. Purchase Order Review API
+
+- `POST /api/v1/purchase-orders/{orderId}/reviews`: 評價交易對方。
+- `GET /api/v1/purchase-orders/{orderId}/reviews/status`: 查詢是否已評價。
+- `GET /api/v1/purchase-order-reviews/me/received?page=0&size=20`: 收到的託購評價。
+
+評價 request:
+
+```json
+{
+  "rating": 5,
+  "comment": "交易順利"
+}
+```
+
+只有 `COMPLETED` 訂單的交易雙方可評價，每人對同一訂單只能評價對方一次。5 星 `+1`、1 星 `-3`；正評沿用 7 天防刷分規則。
+
+## 16. Purchase Block API
+
+`POST /api/v1/blocks`
+
+```json
+{
+  "blockedUserId": 2002
+}
+```
+
+Response: `204 No Content`。封鎖後雙方不能成立新的報價或接單交易。
+
+## 17. Purchase Scheduler
+
+- `expirePurchaseRequests`: 每分鐘將過期 `OPEN` / `QUOTING` 委託與有效報價轉為 `EXPIRED`。
+- `checkPurchaseOrderConfirmationTimeout`: 每分鐘處理成立超過 24 小時仍未完成雙方確認的訂單，依未確認責任方扣分並重開委託。
+- `checkPurchaseOrderAbnormalTimeout`: 每分鐘處理異常 12 小時未回應並扣 10 分。
+- `autoCompletePurchaseOrders`: 每 10 分鐘檢查交貨期限加 24 小時後仍無異常的訂單並自動完成。
+
+### 接單人確認交易
+
+`POST /api/v1/purchase-orders/{orderId}/confirm/runner`
+
+Auth: required，只有接單人可操作。規則與委託人確認相同。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 接單人開始處理
+
+`POST /api/v1/purchase-orders/{orderId}/start`
+
+Auth: required，只有接單人可操作。
+
+- 訂單必須是 `CONFIRMED`。
+- 成功後改為 `IN_PROGRESS` 並記錄 `RUNNER_STARTED` 事件。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 回報商品缺貨
+
+`POST /api/v1/purchase-orders/{orderId}/item-unavailable`
+
+Auth: required，只有接單人可操作。
+
+Request:
+
+```json
+{
+  "reason": "現場找不到商品",
+  "imageUrls": ["shelf.jpg"],
+  "storeName": "中和店"
+}
+```
+
+規則:
+
+- 訂單必須是 `WAITING_CONFIRMATION`、`CONFIRMED` 或 `IN_PROGRESS`。
+- 訂單改為 `UNAVAILABLE_CANCELLED`，不扣信用分。
+- 原得標報價改為 `UNAVAILABLE_CANCELLED`。
+- 原委託未過期時重新開放，否則改為 `EXPIRED`。
+- 原因、門市與證據圖片寫入訂單事件 metadata。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 委託人取消訂單
+
+`POST /api/v1/purchase-orders/{orderId}/cancel/requester`
+
+Request:
+
+```json
+{
+  "reason": "臨時不需要了"
+}
+```
+
+扣分與重開規則:
+
+- `WAITING_CONFIRMATION` / `CONFIRMED`: 扣 `2` 分，原委託未過期時重新開放。
+- `IN_PROGRESS`: 扣 `10` 分，原委託改為 `CANCELLED`，不重新募集。
+- 訂單改為 `PENALIZED_CANCELLED`，扣分與原因寫入事件 metadata。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 接單人取消訂單
+
+`POST /api/v1/purchase-orders/{orderId}/cancel/runner`
+
+Request 格式與委託人取消相同。
+
+扣分規則:
+
+- `WAITING_CONFIRMATION`: 扣 `2` 分。
+- `CONFIRMED` / `IN_PROGRESS`: 扣 `10` 分。
+- 原委託未過期時重新開放，否則改為 `EXPIRED`。
+- `SHIPPED`、`DELIVERED_PENDING_CONFIRM`、`COMPLETED` 不可取消。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 宅配或店到店標記寄出
+
+`POST /api/v1/purchase-orders/{orderId}/ship`
+
+Auth: required，只有接單人可操作。
+
+Request:
+
+```json
+{
+  "logisticsProvider": "黑貓宅急便",
+  "trackingNumber": "123456789",
+  "trackingUrl": "https://example.com/tracking/123456789"
+}
+```
+
+- 交付方式必須是 `HOME_DELIVERY` 或 `STORE_TO_STORE`。
+- 訂單必須是 `IN_PROGRESS`。
+- `logisticsProvider`、`trackingNumber` 必填。
+- 成功後改為 `SHIPPED`。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 面交標記已交貨
+
+`POST /api/v1/purchase-orders/{orderId}/deliver`
+
+Auth: required，只有接單人可操作。
+
+- 交付方式必須是 `FACE_TO_FACE`。
+- 訂單必須是 `IN_PROGRESS`。
+- 成功後改為 `DELIVERED_PENDING_CONFIRM`。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+### 委託人完成訂單
+
+`POST /api/v1/purchase-orders/{orderId}/complete`
+
+Auth: required，只有委託人可操作。
+
+- 一般允許狀態：`SHIPPED`、`DELIVERED_PENDING_CONFIRM`。
+- 面交訂單也允許委託人在 `IN_PROGRESS` 直接確認完成。
+- 成功後改為 `COMPLETED` 並記錄完成事件。
+
+Response: `200 OK`，`PurchaseOrderDetailResponse`。

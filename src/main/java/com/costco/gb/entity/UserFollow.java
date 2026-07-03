@@ -14,23 +14,23 @@ import java.time.LocalDateTime;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserFollow {
 
-    @Id // 🌟 對應你 SQL 的 `id` bigint NOT NULL AUTO_INCREMENT
+    @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "follower_id", nullable = false)
-    private User follower; // 🌟 對應你 SQL 的 `follower_id`
+    private User follower;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "host_id", nullable = false)
-    private User host; // 🌟 對應你 SQL 的 `host_id`
+    private User host;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt; // 🌟 對應你 SQL 的 `created_at`
+    private LocalDateTime createdAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt; // 🌟 對應你 SQL 的 `updated_at`
+    private LocalDateTime updatedAt;
 }

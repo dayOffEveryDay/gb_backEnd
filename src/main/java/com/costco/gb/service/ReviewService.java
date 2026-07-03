@@ -9,7 +9,6 @@ import com.costco.gb.entity.Review;
 import com.costco.gb.entity.User;
 import com.costco.gb.repository.CampaignRepository;
 import com.costco.gb.repository.CreditScoreLogRepository;
-import com.costco.gb.repository.PurchaseRequestReviewRepository;
 import com.costco.gb.repository.ReviewRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +28,6 @@ public class ReviewService {
     private final ReviewRepository reviewRepository;
     private final UserRepository userRepository;
     private final CampaignRepository campaignRepository;
-    private final PurchaseRequestReviewRepository purchaseRequestReviewRepository;
 
     // 🌟 注入信用存摺
     private final CreditScoreLogRepository creditScoreLogRepository;
@@ -77,11 +75,7 @@ public class ReviewService {
             boolean hasRecentPositiveReview = reviewRepository
                     .existsByReviewerIdAndRevieweeIdAndIsScoreCountedTrueAndCreatedAtAfter(
                             reviewerId, reviewee.getId(), sevenDaysAgo);
-            boolean hasRecentPurchasePositiveReview = purchaseRequestReviewRepository
-                    .existsByReviewerIdAndRevieweeIdAndIsScoreCountedTrueAndCreatedAtAfter(
-                            reviewerId, reviewee.getId(), sevenDaysAgo);
-
-            if (hasRecentPositiveReview || hasRecentPurchasePositiveReview) {
+            if (hasRecentPositiveReview) {
                 // 擋下來！分數變動歸零，不發放點數
                 scoreChange = 0;
                 isCounted = false;
@@ -125,7 +119,7 @@ public class ReviewService {
         }
     }
 
-    // 🌟 1. 新增：查詢評價狀態
+    // 查詢目前使用者對指定交易的評價狀態
     @Transactional(readOnly = true)
     public ReviewStatusResponse checkReviewStatus(Long campaignId, Long reviewerId, Long revieweeId) {
         return reviewRepository.findByCampaignIdAndReviewerIdAndRevieweeId(campaignId, reviewerId, revieweeId)

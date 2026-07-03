@@ -50,8 +50,6 @@ public class ChatService {
                 .timestamp(message.getCreatedAt())
                 .build();
     }
-    // ... 原本的 import 與 saveMessage 方法 ...
-
     @Transactional(readOnly = true)
     public List<ChatMessageResponse> getChatHistory(Long userId, Long campaignId) {
 
@@ -67,7 +65,7 @@ public class ChatService {
             throw new RuntimeException("您不是此合購單的成員，無法查看聊天紀錄！");
         }
 
-        // 撈取並按時間排序 (呼叫我們之前在 Repository 寫好的語法)
+        // 依建立時間查詢並排序聊天紀錄
         List<ChatMessage> messages = chatMessageRepository.findByCampaignIdOrderByCreatedAtAsc(campaignId);
 
         // 將 Entity 轉換成前端要的 DTO 格式

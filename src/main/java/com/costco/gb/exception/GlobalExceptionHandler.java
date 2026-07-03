@@ -15,7 +15,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Slf4j
-@RestControllerAdvice // 👈 宣告這是一個全域攔截器
+@RestControllerAdvice
 public class GlobalExceptionHandler {
 
     /**
@@ -25,7 +25,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request) {
 
-        // 印出 Warning 等級的 Log，方便我們後端自己除錯
+        // 商業規則錯誤以 Warning 等級記錄，保留請求路徑與錯誤原因
         log.warn("商業邏輯阻擋 [{}]: {}", request.getRequestURI(), ex.getMessage());
 
         // 包裝成漂漂亮亮的 JSON
@@ -33,7 +33,7 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.BAD_REQUEST.value()) // 400 Bad Request
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
-                .message(ex.getMessage()) // 👈 把我們寫的中文錯誤訊息塞進這裡
+                .message(ex.getMessage())
                 .path(request.getRequestURI())
                 .build();
 
@@ -54,7 +54,7 @@ public class GlobalExceptionHandler {
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value()) // 500 Internal Server Error
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
-                .message("伺服器發生異常，請稍後再試或聯繫客服。") // 👈 絕對不要把真實的系統報錯丟給使用者看
+                .message("伺服器發生異常，請稍後再試或聯繫客服。")
                 .path(request.getRequestURI())
                 .build();
 
@@ -72,7 +72,7 @@ public class GlobalExceptionHandler {
             errors.put(error.getField(), error.getDefaultMessage());
         }
 
-        // 我們把這些欄位錯誤，整合成一個字串放在 message 裡讓前端好顯示
+        // 將欄位驗證錯誤整合到 message，供前端統一顯示
         String errorMessage = "參數格式錯誤: " + errors.values().toString();
 
         ErrorResponse errorResponse = ErrorResponse.builder()

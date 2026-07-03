@@ -54,7 +54,7 @@ public class BlockService {
 
         blockRepository.save(newBlock);
 
-        // 🌟 新增：強力防護網，直接斬斷雙方可能存在的追蹤關係！
+        // 封鎖後同步解除雙方既有的追蹤關係
         // 1. 如果對方原本有追蹤我，強制踢除粉絲
         userFollowRepository.deleteByFollowerIdAndHostId(targetUserId, currentUserId);
 

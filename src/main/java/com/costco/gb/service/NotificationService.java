@@ -10,7 +10,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import org.springframework.data.domain.Pageable; // ✅ 正確的 Spring 分頁
+import org.springframework.data.domain.Pageable;
 import java.util.List;
 import java.util.Map;
 @Slf4j
@@ -41,14 +41,13 @@ public class NotificationService {
         log.info("合購單 {} 滿單推播發送完畢，共計通知 {} 位團員與 1 位團主", campaignId, participants.size());
     }
 
-    // 🌟 專屬：發送合購單被取消的通知給無辜團員
+    // 合購單取消時通知所有受影響的參與者
     @Transactional
     public void notifyCampaignCancelled(Campaign campaign, List<Participant> participants) {
         String content = "😢 很抱歉，您參與的合購單「" + campaign.getItemName() + "」已被團主取消，系統已為您變更狀態。";
 
         for (Participant p : participants) {
-            // 呼叫我們之前寫好的底層 private sendNotification 方法
-            // 發送到 CAMPAIGN_CANCELLED 類型
+            // 以 CAMPAIGN_CANCELLED 類型發送取消通知
             sendNotification(p.getUser(), "CAMPAIGN_CANCELLED", campaign.getId(), content);
         }
         log.info("已發送合購單取消通知給 {} 位團員", participants.size());
@@ -162,7 +161,7 @@ public class NotificationService {
         log.info("已發送仲裁通知給團主 {}", campaign.getHost().getId());
     }
 
-    // 🌟 新增：對特定合購單的聊天室廣播狀態變更事件
+    // 對指定合購單聊天室廣播狀態變更事件
     public void broadcastCampaignStatus(Long campaignId, String status, String message) {
         // 依照你定義的 Payload 結構建立 Map
         Map<String, Object> payload = Map.of(

@@ -1,7 +1,7 @@
 package com.costco.gb.service;
 
 import lombok.extern.slf4j.Slf4j;
-import net.coobird.thumbnailator.Thumbnails; // 🌟 引入壓縮套件
+import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -21,7 +21,7 @@ public class FileService {
 
     private final String BASE_UPLOAD_DIR = "uploads/campaigns/";
 
-    // 🌟 參數改成 List<MultipartFile>
+    // 一次處理多張上傳圖片並回傳可公開存取的網址
     public List<String> uploadChatImages(List<MultipartFile> files, Long campaignId) {
 
         List<String> uploadedUrls = new ArrayList<>();
@@ -34,7 +34,7 @@ public class FileService {
                 Files.createDirectories(uploadPath);
             }
 
-            // 🌟 跑迴圈處理每一張圖片
+            // 每張圖片使用獨立 UUID 檔名，避免檔名衝突
             for (MultipartFile file : files) {
                 if (file.isEmpty()) continue;
 
@@ -43,10 +43,10 @@ public class FileService {
                 String newFilename = UUID.randomUUID().toString() + fileExtension;
                 Path filePath = uploadPath.resolve(newFilename);
 
-                // 🌟 核心壓縮邏輯：判斷如果是圖片，就進行壓縮
+                // 圖片存檔前等比例縮放至最大 1080 x 1080
                 String contentType = file.getContentType();
                 if (contentType != null && contentType.startsWith("image/")) {
-                    // 使用 Thumbnailator 進行無腦壓縮
+                    // 使用 Thumbnailator 壓縮圖片
                     Thumbnails.of(file.getInputStream())
                             .size(1280, 1280)    // 限制最大長寬 (非常適合手機螢幕)
                             .outputQuality(0.75) // 畫質保留 75% (肉眼看不出差異，但檔案大小剩 1/5)

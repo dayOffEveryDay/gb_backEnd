@@ -1,24 +1,37 @@
 package com.costco.gb.controller;
 
-import com.costco.gb.dto.request.CancelPurchaseRequestRequest;
 import com.costco.gb.dto.request.CreatePurchaseRequestRequest;
+import com.costco.gb.dto.request.ExtendPurchaseRequestRequest;
 import com.costco.gb.dto.request.PurchaseQuoteRequest;
-import com.costco.gb.dto.request.UpdateImageOrderRequest;
 import com.costco.gb.dto.request.UpdatePurchaseRequestRequest;
+import com.costco.gb.dto.response.PurchaseOrderResponse;
 import com.costco.gb.dto.response.PurchaseQuoteResponse;
-import com.costco.gb.dto.response.PurchaseRequestResponse;
+import com.costco.gb.dto.response.PurchaseRequestDetailResponse;
+import com.costco.gb.dto.response.PurchaseRequestSummaryResponse;
 import com.costco.gb.service.PurchaseRequestService;
+import com.costco.gb.service.PurchaseQuoteService;
+import com.costco.gb.service.PurchaseRequestImageService;
+import com.costco.gb.dto.request.UpdateImageOrderRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Map;
 import java.util.List;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.DeleteMapping;
 
 @RestController
 @RequestMapping("/api/v1/purchase-requests")
@@ -26,151 +39,141 @@ import java.util.List;
 public class PurchaseRequestController {
 
     private final PurchaseRequestService purchaseRequestService;
-
-    @GetMapping
-    public ResponseEntity<Page<PurchaseRequestResponse>> getPurchaseRequests(
-            @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String rewardType,
-            @RequestParam(required = false) String deliveryMethod,
-            @RequestParam(required = false) String requestArea,
-            @RequestParam(required = false) String status,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
-
-        Page<PurchaseRequestResponse> response = purchaseRequestService.findPublic(
-                keyword, rewardType, deliveryMethod, requestArea, status, getOptionalCurrentUserId(), page, size);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/{requestId}")
-    public ResponseEntity<PurchaseRequestResponse> getPurchaseRequest(@PathVariable Long requestId) {
-        return ResponseEntity.ok(purchaseRequestService.getDetail(requestId, getOptionalCurrentUserId()));
-    }
+    private final PurchaseQuoteService purchaseQuoteService;
+    private final PurchaseRequestImageService purchaseRequestImageService;
 
     @PostMapping
-    public ResponseEntity<PurchaseRequestResponse> createPurchaseRequest(@ModelAttribute CreatePurchaseRequestRequest request) {
-        return ResponseEntity.ok(purchaseRequestService.create(getCurrentUserId(), request));
+    public ResponseEntity<Map<String, Long>> create(
+            Authentication authentication,
+            @Valid @RequestBody CreatePurchaseRequestRequest request
+    ) {
+        Long requestId = purchaseRequestService.create(currentUserId(authentication), request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("id", requestId));
     }
 
-    @PutMapping("/{requestId}")
-    public ResponseEntity<PurchaseRequestResponse> updatePurchaseRequest(
-            @PathVariable Long requestId,
-            @RequestBody UpdatePurchaseRequestRequest request) {
-        return ResponseEntity.ok(purchaseRequestService.update(requestId, getCurrentUserId(), request));
+    @GetMapping
+    public ResponseEntity<Page<PurchaseRequestSummaryResponse>> list(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String city,
+            @RequestParam(required = false) String district,
+            @RequestParam(required = false) String deliveryMethod,
+            @RequestParam(required = false) String rewardType,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(purchaseRequestService.list(
+                status, city, district, deliveryMethod, rewardType, keyword, page, size
+        ));
     }
 
-    @PostMapping("/{requestId}/images")
-    public ResponseEntity<PurchaseRequestResponse> uploadImages(
-            @PathVariable Long requestId,
-            @RequestParam("images") List<MultipartFile> images) {
-        return ResponseEntity.ok(purchaseRequestService.uploadImages(requestId, getCurrentUserId(), images));
-    }
-
-    @PutMapping("/{requestId}/images/order")
-    public ResponseEntity<PurchaseRequestResponse> updateImageOrder(
-            @PathVariable Long requestId,
-            @RequestBody UpdateImageOrderRequest request) {
-        return ResponseEntity.ok(purchaseRequestService.updateImageOrder(requestId, getCurrentUserId(), request.getImageUrls()));
-    }
-
-    @DeleteMapping("/{requestId}/images/{fileName}")
-    public ResponseEntity<PurchaseRequestResponse> deleteImage(
-            @PathVariable Long requestId,
-            @PathVariable String fileName) {
-        return ResponseEntity.ok(purchaseRequestService.deleteImage(requestId, getCurrentUserId(), fileName));
-    }
-
-    @PostMapping("/{requestId}/accept")
-    public ResponseEntity<PurchaseRequestResponse> acceptDirectly(@PathVariable Long requestId) {
-        return ResponseEntity.ok(purchaseRequestService.acceptDirectly(requestId, getCurrentUserId()));
-    }
-
-    @PostMapping("/{requestId}/quotes")
-    public ResponseEntity<PurchaseQuoteResponse> createQuote(
-            @PathVariable Long requestId,
-            @RequestBody PurchaseQuoteRequest request) {
-        return ResponseEntity.ok(purchaseRequestService.createQuote(requestId, getCurrentUserId(), request));
-    }
-
-    @PutMapping("/{requestId}/quotes/{quoteId}")
-    public ResponseEntity<PurchaseQuoteResponse> updateQuote(
-            @PathVariable Long requestId,
-            @PathVariable Long quoteId,
-            @RequestBody PurchaseQuoteRequest request) {
-        return ResponseEntity.ok(purchaseRequestService.updateQuote(requestId, quoteId, getCurrentUserId(), request));
-    }
-
-    @PostMapping("/{requestId}/quotes/{quoteId}/cancel")
-    public ResponseEntity<PurchaseQuoteResponse> cancelQuote(
-            @PathVariable Long requestId,
-            @PathVariable Long quoteId) {
-        return ResponseEntity.ok(purchaseRequestService.cancelQuote(requestId, quoteId, getCurrentUserId()));
-    }
-
-    @GetMapping("/{requestId}/quotes")
-    public ResponseEntity<List<PurchaseQuoteResponse>> getQuotes(@PathVariable Long requestId) {
-        return ResponseEntity.ok(purchaseRequestService.getQuotes(requestId, getCurrentUserId()));
-    }
-
-    @GetMapping("/{requestId}/quotes/me")
-    public ResponseEntity<PurchaseQuoteResponse> getMyQuote(@PathVariable Long requestId) {
-        return ResponseEntity.ok(purchaseRequestService.getMyQuote(requestId, getCurrentUserId()));
-    }
-
-    @PostMapping("/{requestId}/quotes/{quoteId}/accept")
-    public ResponseEntity<PurchaseRequestResponse> acceptQuote(
-            @PathVariable Long requestId,
-            @PathVariable Long quoteId) {
-        return ResponseEntity.ok(purchaseRequestService.acceptQuote(requestId, quoteId, getCurrentUserId()));
-    }
-
-    @PostMapping("/{requestId}/deliver")
-    public ResponseEntity<PurchaseRequestResponse> deliver(@PathVariable Long requestId) {
-        return ResponseEntity.ok(purchaseRequestService.deliver(requestId, getCurrentUserId()));
-    }
-
-    @PostMapping("/{requestId}/complete")
-    public ResponseEntity<PurchaseRequestResponse> complete(@PathVariable Long requestId) {
-        return ResponseEntity.ok(purchaseRequestService.complete(requestId, getCurrentUserId()));
-    }
-
-    @PostMapping("/{requestId}/cancel")
-    public ResponseEntity<PurchaseRequestResponse> cancel(
-            @PathVariable Long requestId,
-            @RequestBody(required = false) CancelPurchaseRequestRequest request) {
-        return ResponseEntity.ok(purchaseRequestService.cancel(requestId, getCurrentUserId(), request));
+    @GetMapping("/{id}")
+    public ResponseEntity<PurchaseRequestDetailResponse> getDetail(
+            @PathVariable Long id,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(purchaseRequestService.getDetail(id, optionalUserId(authentication)));
     }
 
     @GetMapping("/my-created")
-    public ResponseEntity<Page<PurchaseRequestResponse>> getMyCreated(
-            @PageableDefault(page = 0, size = 10) Pageable pageable) {
-        return ResponseEntity.ok(purchaseRequestService.getMyCreated(getCurrentUserId(), pageable));
+    public ResponseEntity<Page<PurchaseRequestSummaryResponse>> getMyCreated(
+            Authentication authentication,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(purchaseRequestService.listMyCreated(
+                currentUserId(authentication), status, page, size
+        ));
     }
 
-    @GetMapping("/my-assigned")
-    public ResponseEntity<Page<PurchaseRequestResponse>> getMyAssigned(
-            @PageableDefault(page = 0, size = 10) Pageable pageable) {
-        return ResponseEntity.ok(purchaseRequestService.getMyAssigned(getCurrentUserId(), pageable));
+    @PutMapping("/{id}")
+    public ResponseEntity<PurchaseRequestDetailResponse> update(
+            Authentication authentication,
+            @PathVariable Long id,
+            @Valid @RequestBody UpdatePurchaseRequestRequest request
+    ) {
+        return ResponseEntity.ok(purchaseRequestService.update(currentUserId(authentication), id, request));
     }
 
-    @GetMapping("/my-quotes")
-    public ResponseEntity<Page<PurchaseRequestResponse>> getMyQuoted(
-            @PageableDefault(page = 0, size = 10) Pageable pageable) {
-        return ResponseEntity.ok(purchaseRequestService.getMyQuoted(getCurrentUserId(), pageable));
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<Void> cancel(Authentication authentication, @PathVariable Long id) {
+        purchaseRequestService.cancel(currentUserId(authentication), id);
+        return ResponseEntity.noContent().build();
     }
 
-    private Long getCurrentUserId() {
-        return Long.parseLong((String) SecurityContextHolder.getContext().getAuthentication().getPrincipal());
+    @PatchMapping("/{id}/extend")
+    public ResponseEntity<PurchaseRequestDetailResponse> extend(
+            Authentication authentication,
+            @PathVariable Long id,
+            @Valid @RequestBody ExtendPurchaseRequestRequest request
+    ) {
+        return ResponseEntity.ok(purchaseRequestService.extend(
+                currentUserId(authentication), id, request.getRequestExpireTime()
+        ));
     }
 
-    private Long getOptionalCurrentUserId() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null
-                && authentication.isAuthenticated()
-                && authentication.getPrincipal() instanceof String principal
-                && !"anonymousUser".equals(principal)) {
-            return Long.parseLong(principal);
+    @PostMapping("/{id}/quotes")
+    public ResponseEntity<PurchaseQuoteResponse> createQuote(
+            Authentication authentication,
+            @PathVariable Long id,
+            @Valid @RequestBody PurchaseQuoteRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                purchaseQuoteService.createQuote(currentUserId(authentication), id, request)
+        );
+    }
+
+    @GetMapping("/{id}/quotes")
+    public ResponseEntity<List<PurchaseQuoteResponse>> getQuotes(
+            Authentication authentication,
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.ok(purchaseQuoteService.getRequestQuotes(currentUserId(authentication), id));
+    }
+
+    @PostMapping("/{id}/accept")
+    public ResponseEntity<PurchaseOrderResponse> acceptFixedRequest(
+            Authentication authentication,
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                purchaseQuoteService.acceptFixedRequest(currentUserId(authentication), id)
+        );
+    }
+
+    @PostMapping(value = "/{id}/images", consumes = "multipart/form-data")
+    public ResponseEntity<Map<String, List<String>>> uploadImages(
+            Authentication authentication, @PathVariable Long id,
+            @RequestParam("images") List<MultipartFile> images) {
+        return ResponseEntity.ok(Map.of("imageUrls", purchaseRequestImageService.upload(
+                currentUserId(authentication), id, images)));
+    }
+
+    @DeleteMapping("/{id}/images/{fileName}")
+    public ResponseEntity<Map<String, List<String>>> deleteImage(
+            Authentication authentication, @PathVariable Long id, @PathVariable String fileName) {
+        return ResponseEntity.ok(Map.of("imageUrls", purchaseRequestImageService.delete(
+                currentUserId(authentication), id, fileName)));
+    }
+
+    @PutMapping("/{id}/images/order")
+    public ResponseEntity<Map<String, List<String>>> reorderImages(
+            Authentication authentication, @PathVariable Long id,
+            @RequestBody UpdateImageOrderRequest request) {
+        return ResponseEntity.ok(Map.of("imageUrls", purchaseRequestImageService.reorder(
+                currentUserId(authentication), id, request.getImageUrls())));
+    }
+
+    private Long currentUserId(Authentication authentication) {
+        return Long.parseLong(authentication.getPrincipal().toString());
+    }
+
+    private Long optionalUserId(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || "anonymousUser".equals(authentication.getPrincipal())) {
+            return null;
         }
-        return null;
+        return currentUserId(authentication);
     }
 }

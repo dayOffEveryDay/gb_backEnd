@@ -38,7 +38,7 @@ public class CampaignController {
         Long currentUserId = null;
         var authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        // 確保有登入，且 Principal 是字串 (我們之前存的 userIdStr)，且不是 "anonymousUser"
+        // 訪客瀏覽時 Principal 可能是 anonymousUser，僅在已登入時解析使用者 ID
         if (authentication != null && authentication.isAuthenticated() &&
                 authentication.getPrincipal() instanceof String &&
                 !"anonymousUser".equals(authentication.getPrincipal())) {
@@ -56,7 +56,7 @@ public class CampaignController {
     @PostMapping
     public ResponseEntity<?> createCampaign(@ModelAttribute CreateCampaignRequest request) {
 
-        // ✨ 從 Token 攔截器中拿出剛剛解析好的 userId
+        // 從 Spring Security Context 取得目前使用者 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long hostId = Long.parseLong(userIdStr);
 
@@ -158,7 +158,7 @@ public class CampaignController {
     @PostMapping("/{id}/unlock")
     public ResponseEntity<?> unlockRevision(@PathVariable("id") Long campaignId) {
 
-        // ✨ 一樣從 Token 抓取當前登入者 (團主) ID
+        // 從 Spring Security Context 取得目前團主 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long hostId = Long.parseLong(userIdStr);
 
@@ -253,7 +253,7 @@ public class CampaignController {
     public ResponseEntity<Page<CampaignSummaryResponse>> getMyHostedCampaigns(
             @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
 
-        // ✨ 用你原本成功的寫法，直接從 SecurityContext 拿！
+        // 從 Spring Security Context 取得目前使用者 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long userId = Long.parseLong(userIdStr);
 
@@ -266,7 +266,7 @@ public class CampaignController {
     public ResponseEntity<Page<CampaignSummaryResponse>> getMyJoinedCampaigns(
             @org.springframework.data.web.PageableDefault(page = 0, size = 10) org.springframework.data.domain.Pageable pageable) {
 
-        // ✨ 一樣的做法
+        // 從 Spring Security Context 取得目前使用者 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long userId = Long.parseLong(userIdStr);
 

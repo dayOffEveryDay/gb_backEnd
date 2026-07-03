@@ -24,7 +24,7 @@ public class UserController {
     @PutMapping("/me")
     public ResponseEntity<?> updateProfile(@RequestBody UpdateProfileRequest request) {
 
-        // ✨ 神奇的地方在這裡：直接從我們寫好的 JwtAuthenticationFilter 中拿出解析好的 userId
+        // JwtAuthenticationFilter 驗證成功後，Principal 會保存目前使用者 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long userId = Long.parseLong(userIdStr);
 

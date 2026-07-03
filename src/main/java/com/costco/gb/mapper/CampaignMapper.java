@@ -9,14 +9,14 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 
-@Component // 🌟 交給 Spring 管理，這樣才能注入 baseUrl
+@Component
 public class CampaignMapper {
 
-    // 這裡請換成你原本寫在 CampaignService 裡的 baseUrl 變數
+    // 圖片完整網址使用的服務基底 URL
     @Value("${app.base-url:http://localhost:8080}")
     private String baseUrl;
 
-    // 🌟 1. 給大廳用的舊方法 (維持不變，直接呼叫新方法並傳入 null)
+    // 產生公開列表使用的合購摘要
     public CampaignSummaryResponse toSummaryResponse(Campaign campaign) {
 
         List<String> imageUrlList = new ArrayList<>();
@@ -30,7 +30,7 @@ public class CampaignMapper {
         return CampaignSummaryResponse.builder()
                 .id(campaign.getId())
                 .itemName(campaign.getItemName())
-                .imageUrls(imageUrlList) // 👈 改成塞入我們剛組裝好的 List
+                .imageUrls(imageUrlList)
                 .scenarioType(campaign.getScenarioType())
                 .pricePerUnit(campaign.getPricePerUnit())
                 .totalQuantity(campaign.getTotalQuantity())
@@ -49,7 +49,7 @@ public class CampaignMapper {
                         .build())
                 .build();
     }
-    // 🌟 2. 給「我的跟團」用的新方法 (傳入 currentUserId 來比對狀態)
+    // 產生包含目前使用者參團狀態的合購摘要
     public CampaignSummaryResponse toSummaryResponse(Campaign campaign , Long currentUserId) {
 
         List<String> imageUrlList = new ArrayList<>();
@@ -59,7 +59,7 @@ public class CampaignMapper {
                 imageUrlList.add(baseUrl + "/images/" + img);
             }
         }
-        // 🔍 找出當前使用者在這張單的專屬狀態
+        // 從參與者資料找出目前使用者在此合購單的狀態
         String myStatus = null;
         if (currentUserId != null && campaign.getParticipants() != null) {
             myStatus = campaign.getParticipants().stream()
@@ -72,7 +72,7 @@ public class CampaignMapper {
         return CampaignSummaryResponse.builder()
                 .id(campaign.getId())
                 .itemName(campaign.getItemName())
-                .imageUrls(imageUrlList) // 👈 改成塞入我們剛組裝好的 List
+                .imageUrls(imageUrlList)
                 .scenarioType(campaign.getScenarioType())
                 .pricePerUnit(campaign.getPricePerUnit())
                 .totalQuantity(campaign.getTotalQuantity())

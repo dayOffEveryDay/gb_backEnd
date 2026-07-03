@@ -2,7 +2,8 @@ package com.costco.gb.config;
 
 import com.costco.gb.entity.Campaign;
 import com.costco.gb.repository.CampaignRepository;
-import com.costco.gb.repository.ParticipantRepository; // 🌟 1. 新增匯入
+import com.costco.gb.repository.ParticipantRepository;
+import com.costco.gb.repository.PurchaseChatRoomMemberRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.Message;
@@ -23,7 +24,8 @@ import java.util.List;
 public class ChatRoomInterceptor implements ChannelInterceptor {
 
     private final CampaignRepository campaignRepository;
-    private final ParticipantRepository participantRepository; // 🌟 2. 注入 ParticipantRepository
+    private final ParticipantRepository participantRepository;
+    private final PurchaseChatRoomMemberRepository purchaseChatRoomMemberRepository;
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
@@ -55,21 +57,21 @@ public class ChatRoomInterceptor implements ChannelInterceptor {
                     // 如果在 3 天內，則放行 (allow subscription)
                 }
 
-                // 🌟 防護二：檢查使用者身分與權限 (核心改動)
+                // 檢查使用者是否具有進入聊天室的權限
                 Principal userPrincipal = accessor.getUser();
                 if (userPrincipal == null) {
                     log.warn("拒絕連線！找不到 WebSocket 使用者身分。");
                     throw new IllegalArgumentException("未授權的連線！");
                 }
 
-                // 從 Principal 拿出我們在 AuthInterceptor 塞進去的 userId
+                // 從 WebSocket Principal 取得已驗證的使用者 ID
                 Long currentUserId = Long.parseLong(userPrincipal.getName());
 
                 // 判斷 1：他是團主嗎？
                 boolean isHost = campaign.getHost().getId().equals(currentUserId);
 
                 // 判斷 2：他是有效的團員嗎？
-                // (細節：我們只允許還在車上的狀態進入，如果他已經退團/被踢，就不給進)
+                // 僅允許團主或狀態仍有效的參與者進入聊天室
                 boolean isParticipant = participantRepository.existsByCampaignIdAndUserIdAndStatusIn(
                         campaignId,
                         currentUserId,
@@ -80,6 +82,15 @@ public class ChatRoomInterceptor implements ChannelInterceptor {
                 if (!isHost && !isParticipant) {
                     log.warn("安全攔截！使用者 {} 嘗試偷看合購單 {} 的聊天室被拒絕", currentUserId, campaignId);
                     throw new IllegalArgumentException("您不是此合購單的成員，無法進入聊天室！");
+                }
+            }
+            if (destination != null && destination.startsWith("/topic/chat/rooms/")) {
+                Principal principal = accessor.getUser();
+                if (principal == null) throw new IllegalArgumentException("未授權的連線");
+                Long roomId = extractCampaignId(destination);
+                Long userId = Long.parseLong(principal.getName());
+                if (purchaseChatRoomMemberRepository.findByRoomIdAndUserId(roomId, userId).isEmpty()) {
+                    throw new IllegalArgumentException("您不是此託購聊天室成員");
                 }
             }
         }

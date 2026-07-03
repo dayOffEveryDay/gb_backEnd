@@ -10,7 +10,7 @@ import com.costco.gb.entity.*;
 import com.costco.gb.mapper.CampaignMapper;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value; // 貼上這行
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.data.domain.Page;
@@ -46,18 +46,18 @@ public class CampaignService {
     private final CreditScoreService creditScoreService;
 
 
-    // 🌟 注入 YML 裡的 base-url 參數
+    // 圖片完整網址使用的服務基底 URL
     @Value("${app.base-url}")
     private String baseUrl;
 
-    // ✨ 參數補上 currentUserId
+    // currentUserId 可為空，登入時用於補充使用者的參團狀態
     public Page<CampaignSummaryResponse> getActiveCampaigns(
             Integer storeId, Integer categoryId, String keyword, Long currentUserId, int page, int size) {
 
         // 1. 設定分頁與排序 (依建立時間倒序，越新的在越上面)
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
 
-        // 2. 呼叫強大的動態查詢 (把 currentUserId 傳進去)
+        // 2. 依篩選條件及目前使用者查詢合購資料
         Page<Campaign> campaignPage = campaignRepository.findCampaignsWithFilters(
                 storeId, categoryId, keyword, currentUserId, pageable);
 
@@ -105,7 +105,7 @@ public class CampaignService {
 
                 for (MultipartFile file : images) {
                     if (!file.isEmpty()) {
-                        // 取得原本的副檔名 (例如 .jpg, .png)
+                        // 保留來源檔案的副檔名，例如 .jpg 或 .png
                         String originalFilename = file.getOriginalFilename();
                         String extension = (originalFilename != null && originalFilename.contains("."))
                                 ? originalFilename.substring(originalFilename.lastIndexOf("."))
@@ -116,12 +116,9 @@ public class CampaignService {
 
                         // 將檔案實體存入伺服器硬碟
                         File destinationFile = new File(uploadDir, newFileName);
-//                        file.transferTo(destinationFile);
-                        // 🌟 核心魔法：使用 Thumbnailator 在存檔時直接壓縮為 1080p
-                        // (取代原本的 file.transferTo(destinationFile);)
+                        // 存檔前將圖片等比例縮放至最大 1080 x 1080
                         Thumbnails.of(file.getInputStream())
                                 .size(1080, 1080)        // 強制限制最大長寬為 1080，會自動等比例縮放
-                               // .outputQuality(0.85)     // 設定畫質為 85%，肉眼看不出差異，但檔案會變超小
                                 .toFile(destinationFile);
 
                         savedFileNames.add(newFileName);
@@ -159,7 +156,7 @@ public class CampaignService {
             log.info("User {} 成功發起了合購單: {}", hostId, campaign.getItemName());
 
         } catch (Exception e) {
-            // 🚨 6. 失敗退場機制：如果資料庫寫入失敗，把剛剛存進硬碟的圖片通通刪掉！
+            // 建單失敗時清除本次已寫入的圖片，避免留下無對應資料的檔案
             for (String fileName : savedFileNames) {
                 File fileToDelete = new File(UPLOAD_DIR + fileName);
                 if (fileToDelete.exists()) {
@@ -195,13 +192,13 @@ public class CampaignService {
             throw new IllegalArgumentException("圖片數量不符，無法更新排序。舊數量: " + oldSize + ", 新數量: " + newSize);
         }
 
-        // 🌟 核心修復：將前端傳來的 List<String> 組合回「逗號分隔的字串」
+        // 資料庫以逗號分隔字串保存圖片名稱
         String joinedUrls = "";
         if (newImageUrls != null && !newImageUrls.isEmpty()) {
             joinedUrls = String.join(",", newImageUrls);
         }
 
-        // 存回實體 (現在型別都是 String 了，編譯器會很開心)
+        // 更新圖片順序並保存
         campaign.setImageUrls(joinedUrls);
         campaignRepository.save(campaign);
 
@@ -213,7 +210,7 @@ public class CampaignService {
     public Page<CampaignSummaryResponse> getMyHostedCampaigns(Long userId, Pageable pageable) {
         Page<Campaign> campaigns = campaignRepository.findByHostIdOrderByCreatedAtDesc(userId, pageable);
 
-        // 呼叫我們之前寫好、帶有完整圖片網址的 mapToSummaryResponse
+        // 將 Entity 轉換成包含完整圖片網址的回傳 DTO
         return campaigns.map(campaignMapper::toSummaryResponse);
     }
 
@@ -222,7 +219,7 @@ public class CampaignService {
     public Page<CampaignSummaryResponse> getMyJoinedCampaigns(Long userId, Pageable pageable) {
         Page<Campaign> campaigns = campaignRepository.findJoinedCampaignsByUserId(userId, pageable);
 
-        // 一樣無痛轉成前端需要的 DTO 格式
+        // 將 Entity 轉換成前端需要的 DTO
         return campaigns.map(campaign -> campaignMapper.toSummaryResponse(campaign, userId));
     }
     // 輔助方法：Entity 轉 DTO
@@ -243,7 +240,7 @@ public class CampaignService {
 //        return CampaignSummaryResponse.builder()
 //                .id(campaign.getId())
 //                .itemName(campaign.getItemName())
-//                .imageUrls(imageUrlList) // 👈 改成塞入我們剛組裝好的 List
+//                .imageUrls(imageUrlList)
 //                .scenarioType(campaign.getScenarioType())
 //                .pricePerUnit(campaign.getPricePerUnit())
 //                .totalQuantity(campaign.getTotalQuantity())
@@ -328,7 +325,7 @@ public class CampaignService {
         }
 
         // 1. 撈取所有曾經加入過這張單的團員 (這裡用 findAllByCampaignId，不用濾掉 CANCELLED，讓團主看得到誰跳車)
-        // 💡 注意：如果你之前的 ParticipantRepository 沒有 findByCampaignId 方法，請記得去補上喔！
+        // 載入此合購單的全部參與者資料
         List<Participant> allParticipants = participantRepository.findByCampaignId(campaignId);
 
         // 2. 將團員名單轉換成 DTO
@@ -365,7 +362,7 @@ public class CampaignService {
     @Transactional
     public void joinCampaign(Long userId, Long campaignId, JoinCampaignRequest request) {
 
-        // 1. 基本防呆檢查 (保持不變)
+        // 1. 驗證合購單狀態、期限及認購資格
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
 
@@ -391,26 +388,25 @@ public class CampaignService {
             throw new RuntimeException("剩餘數量不足。請確認認購數量或是是否已滿團。");
         }
 
-        // 🌟 關鍵修復：手動同步 Java 記憶體中的 Entity 狀態！
-        // 這樣 Hibernate 待會如果要做 save 或髒檢查時，拿到的就會是「已經扣掉」的正確數字。
+        // 原子更新資料庫後同步記憶體中的剩餘數量，避免後續判斷使用舊值
         campaign.setAvailableQuantity(campaign.getAvailableQuantity() - request.getQuantity());
 
-        // 🌟 這裡故意不加 AndStatus，因為我們要連他「過去取消的紀錄」一起撈出來檢查！
+        // 查詢不限制狀態，需同時處理使用者過去取消後再次加入的紀錄
         Optional<Participant> optionalParticipant = participantRepository.findByCampaignIdAndUserId(campaignId, userId);
 
         if (optionalParticipant.isPresent()) {
             Participant existingParticipant = optionalParticipant.get();
             String currentStatus = existingParticipant.getStatus();
 
-            // 🛡️ 判斷 1：他是不是曾經跳車，或「被踢除」，現在要「重新上車」？
+            // 曾取消或被移除的參與者重新加入時，重設狀態與數量
             if ("CANCELLED".equals(currentStatus) || "KICKED".equals(currentStatus)) {
-                existingParticipant.setStatus("JOINED"); // 🌟 狀態復活！
+                existingParticipant.setStatus("JOINED");
                 existingParticipant.setQuantity(request.getQuantity()); // 數量不累加，直接覆蓋成這次要求的新數量
 
                 log.info("User {} 重新加入了合購單 {} (從 {} 狀態復活)，數量: {}",
                         userId, campaignId, currentStatus, request.getQuantity());
             }
-            // 🛡️ 判斷 2：他原本就在車上，只是要「追加數量」 (改為明確判斷 JOINED)
+            // 已在團內的參與者再次認購時累加數量
             else if ("JOINED".equals(currentStatus)) {
                 existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
 
@@ -421,7 +417,7 @@ public class CampaignService {
             participantRepository.save(existingParticipant);
 
         } else {
-            // 🛡️ 判斷 3：他是首購族，資料庫完全沒有他的紀錄
+            // 尚無參與紀錄時建立新的參與者資料
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new RuntimeException("User not found"));
             Participant newParticipant = Participant.builder()
@@ -437,16 +433,13 @@ public class CampaignService {
             log.info("User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
         }
 
-        // 4. 檢查是否滿單 (寫法變得更簡單了！)
-        // 因為我們前面已經同步了實體的數字，這裡直接檢查 getAvailableQuantity() 是否為 0 即可
+        // 4. 剩餘數量歸零時將合購單標記為滿單
         if (campaign.getAvailableQuantity() == 0) {
             campaign.setStatus("FULL");
             log.info("合購單 {} 已達滿單狀態！", campaignId);
-            // 🌟 觸發滿單通知推播！
+            // 滿單後通知團主與參與者
             notificationService.notifyCampaignFull(campaign);
-            // 💡 其實在 @Transactional 的方法內，只要你 set 了值，
-            // 交易結束時 Hibernate 會自動幫你 save，所以下面這行甚至可以省略！
-            // campaignRepository.save(campaign);
+            // 交易提交時由 Hibernate dirty checking 更新狀態
         }
     }
 
@@ -533,7 +526,7 @@ public class CampaignService {
             throw new RuntimeException("合購單已滿單鎖定，如需修改請在聊天室請團主開放修改權限！");
         }
 
-        // 2. 🌟 修正：必須確保他現在還在車上 (JOINED)！
+        // 只允許目前仍為 JOINED 的參與者調整數量
         Participant participant = participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, userId, "JOINED")
                 .orElseThrow(() -> new RuntimeException("您尚未加入此合購單，或已經退出！"));
 
@@ -550,14 +543,14 @@ public class CampaignService {
         // 5. 歸還庫存
         campaignRepository.incrementQuantity(campaignId, request.getQuantity());
 
-        // 🌟 手動同步記憶體狀態
+        // 同步記憶體中的剩餘數量
         int currentAvailable = campaign.getAvailableQuantity() + request.getQuantity();
         campaign.setAvailableQuantity(currentAvailable);
 
-        // 6. 狀態回朔魔法
+        // 6. 釋出名額後恢復招募狀態並關閉特殊修改權限
         if (currentAvailable > 0) {
             campaign.setStatus("OPEN");
-            campaign.setAllowRevision(false); // 🌟 記得把鎖扣回去！回到一般招募狀態
+            campaign.setAllowRevision(false);
             log.info("合購單 {} 釋出名額，恢復為 OPEN 狀態，並關閉特權修改鎖！", campaignId);
         }
 
@@ -568,7 +561,7 @@ public class CampaignService {
     @Transactional
     public void withdrawCampaign(Long userId, Long campaignId) {
 
-        // 1. 🌟 修正：直接用 AndStatus 精準抓出還在車上的人，取代原本的 if 判斷，程式碼更簡潔
+        // 1. 僅查詢目前仍為 JOINED 的參與紀錄
         Participant participant = participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, userId, "JOINED")
                 .orElseThrow(() -> new RuntimeException("您並未參加此合購單，或已經退出過了！"));
 
@@ -589,15 +582,13 @@ public class CampaignService {
         participantRepository.save(participant);
 
         // 4. 原子性加回庫存
-        // 🌟 注意：如果你的 incrementQuantityAndReopen 裡面是用 SQL 寫死的，
-        // 記得去 Repository 裡面把 SQL 改成 `allow_revision = false` 喔！
-        // 如果不想改 SQL，可以在這裡手動用 Hibernate 儲存：
+        // 4. 歸還庫存並恢復招募狀態
         campaign.setAvailableQuantity(campaign.getAvailableQuantity() + participant.getQuantity());
         campaign.setStatus("OPEN");
-        campaign.setAllowRevision(false); // 🌟 把鎖扣回去！
+        campaign.setAllowRevision(false);
         campaignRepository.save(campaign);
 
-        // 5. 信用記點：增加反悔次數 (這招超棒！)
+        // 5. 增加參與者取消次數
         User user = userRepository.findById(userId).orElseThrow();
         user.setParticipantCancelCount(incrementCount(user.getParticipantCancelCount()));
         userRepository.save(user);
@@ -605,7 +596,7 @@ public class CampaignService {
         log.info("User {} 成功退出了合購單 {}，釋放數量: {}，累積反悔次數: {}",
                 userId, campaignId, participant.getQuantity(), user.getParticipantCancelCount());
 
-        // 🌟  發送通知給團主
+        // 通知團主有參與者退出
          notificationService.sendNotification(campaign.getHost(), "MEMBER_WITHDRAW", campaignId,
             "😢 團員已退出您的合購單「" + campaign.getItemName() + "」，目前已恢復招募狀態。");
 
@@ -751,14 +742,14 @@ public class CampaignService {
         if (!activeParticipants.isEmpty()) {
             log.warn("團主 {} 取消了已有 {} 人上車的合購單 {}", hostId, activeParticipants.size(), campaignId);
 
-            // 1. 標記戰犯與原因
+            // 1. 記錄取消責任人與原因
             campaign.setBlameUser(campaign.getHost());
             campaign.setCancelReason("團主主動取消 (已有團員上車)");
 
-            // (假設你的 userService 有這支 API，未來可以補上扣分)
-            creditScoreService.recordScoreChange (hostId, 10, "取消已有團員的合購單：「" + campaign.getItemName() + "」" ,campaignId);
+            // 團主在已有參與者時取消合購，依規則扣除信用分
+            creditScoreService.recordScoreChange (hostId, -10, "取消已有團員的合購單：「" + campaign.getItemName() + "」" ,campaignId);
 
-            // 2. 將所有無辜團員「強制踢下車」
+            // 2. 取消所有仍在團內的參與紀錄
             User host = campaign.getHost();
             host.setHostCancelCount(incrementCount(host.getHostCancelCount()));
             userRepository.save(host);
@@ -768,14 +759,14 @@ public class CampaignService {
             }
             participantRepository.saveAll(activeParticipants);
 
-            // 🔔 3. 呼叫我們剛剛寫好的通知服務！(一秒推播給所有人)
+            // 3. 通知所有受影響的參與者
             notificationService.notifyCampaignCancelled(campaign, activeParticipants);
 
         } else {
             campaign.setCancelReason("團主主動取消 (無人上車)");
         }
 
-        // 💀 最終：將合購單本體標記為取消
+        // 將合購單標記為取消並重設剩餘數量
         campaign.setStatus("CANCELLED");
         campaign.setAvailableQuantity(campaign.getTotalQuantity());
 
@@ -800,7 +791,7 @@ public class CampaignService {
                     .build();
         }
 
-        // 🌟 修正：這裡改用 AndStatus，只抓狀態是 'JOINED' 的紀錄！
+        // 僅查詢目前仍為 JOINED 的參與紀錄
         return participantRepository.findByCampaignIdAndUserIdAndStatus(campaignId, userId, "JOINED")
                 .map(participant -> MyParticipationResponse.builder()
                         .isHost(false)

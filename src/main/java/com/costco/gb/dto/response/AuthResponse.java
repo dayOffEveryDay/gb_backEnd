@@ -8,7 +8,8 @@ import lombok.Data;
 public class AuthResponse {
     private String token;
     private boolean isNewUser;
-    private String refreshToken;  // 🌟 新增這行：這是長命的 Refresh Token
+    // 用於換發 Access Token 的長效憑證
+    private String refreshToken;
     private UserDto user;
 
     @Data

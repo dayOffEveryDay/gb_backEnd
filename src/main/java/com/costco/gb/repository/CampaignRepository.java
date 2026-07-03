@@ -48,7 +48,7 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
             @Param("storeId") Integer storeId,
             @Param("categoryId") Integer categoryId,
             @Param("keyword") String keyword,
-            @Param("userId") Long userId, // ✨ 新增這行：傳入當前登入者 ID
+            @Param("userId") Long userId,
             Pageable pageable);
 
 
@@ -58,7 +58,7 @@ public interface CampaignRepository extends JpaRepository<Campaign, Long> {
     int decrementQuantity(@Param("campaignId") Long campaignId, @Param("quantity") Integer quantity);
 
 
-    // 🌟 新增：安全地歸還庫存 (加回去)
+    // 使用原子更新歸還庫存，避免併發操作造成數量不一致
     @Modifying
     @Query("UPDATE Campaign c SET c.availableQuantity = c.availableQuantity + :quantity WHERE c.id = :campaignId")
     int incrementQuantity(@Param("campaignId") Long campaignId, @Param("quantity") Integer quantity);

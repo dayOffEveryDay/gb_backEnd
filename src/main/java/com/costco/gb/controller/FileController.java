@@ -19,10 +19,10 @@ public class FileController {
 
     private final FileService fileService;
 
-    // 🌟 API 端點可以改叫 /upload/multiple，或者維持原樣
+    // 上傳多張聊天室圖片
     @PostMapping("/upload")
     public ResponseEntity<?> uploadFiles(
-            @RequestParam("files") List<MultipartFile> files, // 🌟 注意這裡改成 files (加 s)
+            @RequestParam("files") List<MultipartFile> files,
             @RequestParam(value = "campaignId", required = false) Long campaignId) {
 
         // 拿到的會是一個 List 裡面裝著多個網址
@@ -30,7 +30,7 @@ public class FileController {
 
         return ResponseEntity.ok(Map.of(
                 "success", true,
-                "urls", imageUrls // 🌟 回傳 JSON 變成 urls 的陣列
+                "urls", imageUrls
         ));
     }
 }

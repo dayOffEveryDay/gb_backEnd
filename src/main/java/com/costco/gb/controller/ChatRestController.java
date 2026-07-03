@@ -21,7 +21,7 @@ public class ChatRestController {
     public ResponseEntity<List<ChatMessageResponse>> getChatHistory(
             @PathVariable("campaignId") Long campaignId) {
 
-        // 從 Spring Security Context 取出當前使用者 ID (與你的 ReviewController 寫法一致！)
+        // 從 Spring Security Context 取得目前使用者 ID
         String userIdStr = (String) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long userId = Long.parseLong(userIdStr);
 

@@ -3,6 +3,7 @@ package com.costco.gb.controller;
 import com.costco.gb.dto.request.ChatMessageRequest;
 import com.costco.gb.dto.response.ChatMessageResponse;
 import com.costco.gb.service.ChatService;
+import com.costco.gb.service.PurchaseChatService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Controller;
 public class ChatController {
 
     private final ChatService chatService;
+    private final PurchaseChatService purchaseChatService;
 
     @MessageMapping("/chat/{campaignId}/sendMessage")
     @SendTo("/topic/campaigns/{campaignId}") // 成功後自動廣播到該房間
@@ -35,5 +37,15 @@ public class ChatController {
 
         // 儲存並回傳 (如果不符合身分，Service 會拋出例外擋下)
         return chatService.saveMessage(userId, campaignId, request);
+    }
+
+    @MessageMapping("/chat/rooms/{chatRoomId}/sendMessage")
+    public void sendPurchaseMessage(
+            @DestinationVariable Long chatRoomId,
+            @Payload ChatMessageRequest request,
+            SimpMessageHeaderAccessor headerAccessor) {
+        Long userId = (Long) headerAccessor.getSessionAttributes().get("userId");
+        if (userId == null) throw new RuntimeException("未授權的連線");
+        purchaseChatService.sendByRoom(userId, chatRoomId, "TEXT", request.getContent());
     }
 }

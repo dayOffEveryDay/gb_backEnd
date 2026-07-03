@@ -20,10 +20,10 @@ public interface ParticipantRepository extends JpaRepository<Participant, Long> 
 
     List<Participant> findByCampaignId(Long campaignId);
 
-    // ✅ 修正版 1：專門抓「還在車上 (狀態為 JOINED)」的參團紀錄
+    // 查詢狀態為 JOINED 的有效參與紀錄
     Optional<Participant> findByCampaignIdAndUserIdAndStatus(Long campaignId, Long userId, String status);
 
-    // ✅ 修正版 2：撈出這張合購單「所有未取消」的團員 (發送滿單通知時要用這個，不然跳車的人也會收到通知！)
+    // 查詢指定狀態的參與者，避免通知已退出或被移除的使用者
     List<Participant> findByCampaignIdAndStatus(Long campaignId, String status);
     // 我的跟團紀錄：查詢某位使用者參與的所有單
     Page<Participant> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);

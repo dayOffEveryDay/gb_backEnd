@@ -27,7 +27,8 @@ public class Participant extends BaseEntity {
     private String status = "JOINED";
 
     @Column(name = "dispute_reason", length = 500)
-    private String disputeReason; // 🌟 新增：存放爭議/投訴原因
+    // 參與者提出爭議或申訴時填寫的原因
+    private String disputeReason;
     // 🌟 團主的矛：團主標記棄單時的備註 (例如："打電話都不接")
     @Column(name = "host_note", length = 255)
     private String hostNote;

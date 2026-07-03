@@ -3,7 +3,6 @@ package com.costco.gb.dto.response;
 import lombok.Builder;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -11,10 +10,16 @@ import java.time.LocalDateTime;
 public class PurchaseQuoteResponse {
     private Long id;
     private Long purchaseRequestId;
-    private BigDecimal quoteAmount;
-    private String note;
+    private String itemName;
+    private Long quoterId;
+    private String quoterDisplayName;
+    private String quoterProfileImageUrl;
+    private Integer quoterCreditScore;
+    private Integer quoteAmount;
+    private String quoteNote;
     private String status;
-    private PurchaseRequestResponse.UserSummary runner;
+    private LocalDateTime selectedAt;
+    private LocalDateTime withdrawnAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

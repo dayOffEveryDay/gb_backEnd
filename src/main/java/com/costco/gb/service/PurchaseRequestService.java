@@ -1,692 +1,638 @@
 package com.costco.gb.service;
 
-import com.costco.gb.dto.request.CancelPurchaseRequestRequest;
 import com.costco.gb.dto.request.CreatePurchaseRequestRequest;
-import com.costco.gb.dto.request.PurchaseQuoteRequest;
+import com.costco.gb.dto.request.MeetupRangeRequest;
 import com.costco.gb.dto.request.UpdatePurchaseRequestRequest;
-import com.costco.gb.dto.response.PurchaseQuoteResponse;
-import com.costco.gb.dto.response.PurchaseRequestResponse;
+import com.costco.gb.dto.response.MeetupRangeResponse;
+import com.costco.gb.dto.response.PurchaseRequestDetailResponse;
+import com.costco.gb.dto.response.PurchaseRequestSummaryResponse;
+import com.costco.gb.entity.PurchaseOrder;
+import com.costco.gb.entity.PurchaseQuote;
 import com.costco.gb.entity.PurchaseRequest;
-import com.costco.gb.entity.PurchaseRequestQuote;
+import com.costco.gb.entity.PurchaseRequestMeetupRange;
 import com.costco.gb.entity.User;
-import com.costco.gb.repository.PurchaseRequestQuoteRepository;
+import com.costco.gb.entity.UserDeliveryProfile;
+import com.costco.gb.repository.PurchaseOrderRepository;
+import com.costco.gb.repository.PurchaseQuoteRepository;
+import com.costco.gb.repository.PurchaseRequestMeetupRangeRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
+import com.costco.gb.repository.UserDeliveryProfileRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import net.coobird.thumbnailator.Thumbnails;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseRequestService {
 
-    private static final String STATUS_OPEN = "OPEN";
-    private static final String STATUS_ASSIGNED = "ASSIGNED";
-    private static final String STATUS_DELIVERED = "DELIVERED";
-    private static final String STATUS_COMPLETED = "COMPLETED";
-    private static final String STATUS_CANCELLED = "CANCELLED";
-    private static final String REWARD_FIXED = "FIXED";
-    private static final String REWARD_QUOTE = "QUOTE";
-    private static final String QUOTE_PENDING = "PENDING";
-    private static final String QUOTE_ACCEPTED = "ACCEPTED";
-    private static final String QUOTE_CANCELLED = "CANCELLED";
+    private static final String FACE_TO_FACE = "FACE_TO_FACE";
+    private static final Set<String> REWARD_TYPES = Set.of("FIXED", "QUOTE");
+    private static final Set<String> DELIVERY_METHODS = Set.of(
+            FACE_TO_FACE, "HOME_DELIVERY", "STORE_TO_STORE"
+    );
+    private static final Set<String> REQUEST_STATUSES = Set.of(
+            "OPEN", "QUOTING", "ORDERED", "EXPIRED", "CANCELLED"
+    );
+    private static final Set<String> MEETUP_LOCATION_TYPES = Set.of(
+            "TRANSIT_RANGE", "LANDMARK", "ROAD", "DISTRICT", "CUSTOM"
+    );
 
     private final PurchaseRequestRepository purchaseRequestRepository;
-    private final PurchaseRequestQuoteRepository quoteRepository;
+    private final PurchaseRequestMeetupRangeRepository meetupRangeRepository;
+    private final UserDeliveryProfileRepository profileRepository;
+    private final PurchaseQuoteRepository quoteRepository;
+    private final PurchaseOrderRepository orderRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
-    private final String uploadDir = "uploads/campaigns/";
-
-    @Value("${app.base-url:http://localhost:8080}")
-    private String baseUrl;
 
     @Transactional
-    public PurchaseRequestResponse create(Long requesterId, CreatePurchaseRequestRequest request) {
-        User requester = findUser(requesterId);
-        validateRequestFields(request.getProductName(), request.getRewardType(), request.getFixedRewardAmount(), request.getDeliveryMethod());
+    public Long create(Long userId, CreatePurchaseRequestRequest request) {
+        String rewardType = normalizeRequired(request.getRewardType(), "酬金模式不可空白");
+        String deliveryMethod = normalizeRequired(request.getDeliveryMethod(), "交付方式不可空白");
+        validateCreateRequest(request, rewardType, deliveryMethod);
 
-        List<String> savedFileNames = saveImages(request.getImages(), 0);
-        try {
-            PurchaseRequest purchaseRequest = PurchaseRequest.builder()
-                    .requester(requester)
-                    .productName(request.getProductName().trim())
-                    .imageUrls(String.join(",", savedFileNames))
-                    .rewardType(request.getRewardType().trim().toUpperCase())
-                    .fixedRewardAmount(normalizeFixedReward(request.getRewardType(), request.getFixedRewardAmount()))
-                    .deliveryMethod(request.getDeliveryMethod().trim().toUpperCase())
-                    .requestArea(trimToNull(request.getRequestArea()))
-                    .deadlineAt(request.getDeadlineAt())
-                    .deliveryTimeType(normalizeDeliveryTimeType(request.getDeliveryTimeType()))
-                    .deliveryTimeNote(trimToNull(request.getDeliveryTimeNote()))
-                    .minCreditScore(request.getMinCreditScore())
-                    .description(trimToNull(request.getDescription()))
-                    .status(STATUS_OPEN)
-                    .build();
+        User requester = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("找不到目前登入使用者"));
 
-            PurchaseRequest saved = purchaseRequestRepository.save(purchaseRequest);
-            return toResponse(saved, requesterId);
-        } catch (RuntimeException e) {
-            deleteSavedFiles(savedFileNames);
-            throw e;
-        }
-    }
-
-    @Transactional
-    public PurchaseRequestResponse update(Long requestId, Long requesterId, UpdatePurchaseRequestRequest request) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        requireOpen(purchaseRequest);
-
-        boolean hasPendingQuotes = quoteRepository.existsByPurchaseRequestIdAndStatus(requestId, QUOTE_PENDING);
-        String nextRewardType = request.getRewardType() == null ? purchaseRequest.getRewardType() : request.getRewardType().trim().toUpperCase();
-        if (hasPendingQuotes && !purchaseRequest.getRewardType().equals(nextRewardType)) {
-            throw new RuntimeException("已有跑腿者報價，不能切換酬金模式");
-        }
-
-        String nextProductName = request.getProductName() == null ? purchaseRequest.getProductName() : request.getProductName();
-        String nextDeliveryMethod = request.getDeliveryMethod() == null ? purchaseRequest.getDeliveryMethod() : request.getDeliveryMethod();
-        BigDecimal nextFixedReward = request.getFixedRewardAmount() == null ? purchaseRequest.getFixedRewardAmount() : request.getFixedRewardAmount();
-        validateRequestFields(nextProductName, nextRewardType, nextFixedReward, nextDeliveryMethod);
-
-        purchaseRequest.setProductName(nextProductName.trim());
-        purchaseRequest.setRewardType(nextRewardType);
-        purchaseRequest.setFixedRewardAmount(normalizeFixedReward(nextRewardType, nextFixedReward));
-        purchaseRequest.setDeliveryMethod(nextDeliveryMethod.trim().toUpperCase());
-        purchaseRequest.setRequestArea(trimToNull(request.getRequestArea()));
-        purchaseRequest.setDeadlineAt(request.getDeadlineAt());
-        purchaseRequest.setDeliveryTimeType(normalizeDeliveryTimeType(request.getDeliveryTimeType()));
-        purchaseRequest.setDeliveryTimeNote(trimToNull(request.getDeliveryTimeNote()));
-        purchaseRequest.setMinCreditScore(request.getMinCreditScore());
-        purchaseRequest.setDescription(trimToNull(request.getDescription()));
-
-        return toResponse(purchaseRequestRepository.save(purchaseRequest), requesterId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse uploadImages(Long requestId, Long requesterId, List<MultipartFile> images) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        requireOpen(purchaseRequest);
-
-        List<String> currentImages = parseImageNames(purchaseRequest.getImageUrls());
-        List<String> savedFileNames = saveImages(images, currentImages.size());
-        currentImages.addAll(savedFileNames);
-        purchaseRequest.setImageUrls(String.join(",", currentImages));
-        return toResponse(purchaseRequestRepository.save(purchaseRequest), requesterId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse updateImageOrder(Long requestId, Long requesterId, List<String> imageUrls) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-
-        List<String> currentImages = parseImageNames(purchaseRequest.getImageUrls());
-        List<String> nextImages = imageUrls == null ? List.of() : imageUrls.stream()
-                .map(this::extractFileName)
-                .filter(Objects::nonNull)
-                .toList();
-
-        if (currentImages.size() != nextImages.size() || !new HashSet<>(currentImages).equals(new HashSet<>(nextImages))) {
-            throw new RuntimeException("圖片排序內容不符合目前託購單圖片");
-        }
-
-        purchaseRequest.setImageUrls(String.join(",", nextImages));
-        return toResponse(purchaseRequestRepository.save(purchaseRequest), requesterId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse deleteImage(Long requestId, Long requesterId, String fileName) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        requireOpen(purchaseRequest);
-
-        String normalizedFileName = extractFileName(fileName);
-        List<String> images = new ArrayList<>(parseImageNames(purchaseRequest.getImageUrls()));
-        if (!images.remove(normalizedFileName)) {
-            throw new RuntimeException("託購單沒有這張圖片");
-        }
-
-        purchaseRequest.setImageUrls(String.join(",", images));
-        File imageFile = new File(uploadDir, normalizedFileName);
-        if (imageFile.exists() && !imageFile.delete()) {
-            log.warn("Failed to delete purchase request image {}", normalizedFileName);
-        }
-
-        return toResponse(purchaseRequestRepository.save(purchaseRequest), requesterId);
-    }
-
-    @Transactional(readOnly = true)
-    public Page<PurchaseRequestResponse> findPublic(String keyword, String rewardType, String deliveryMethod,
-                                                    String requestArea, String status, Long currentUserId,
-                                                    int page, int size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        String normalizedStatus = trimToNull(status);
-        boolean onlyAvailable = normalizedStatus == null;
-        Page<PurchaseRequest> requests = purchaseRequestRepository.findWithFilters(
-                trimToNull(keyword),
-                normalizeOptional(rewardType),
-                normalizeOptional(deliveryMethod),
-                trimToNull(requestArea),
-                normalizedStatus == null ? null : normalizedStatus.toUpperCase(),
-                onlyAvailable,
-                LocalDateTime.now(),
-                pageable);
-        return requests.map(request -> toResponse(request, currentUserId));
-    }
-
-    @Transactional(readOnly = true)
-    public PurchaseRequestResponse getDetail(Long requestId, Long currentUserId) {
-        return toResponse(findRequest(requestId), currentUserId);
-    }
-
-    @Transactional
-    public PurchaseQuoteResponse createQuote(Long requestId, Long runnerId, PurchaseQuoteRequest request) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        User runner = findUser(runnerId);
-        requireQuoteMode(purchaseRequest);
-        requireOpen(purchaseRequest);
-        requireNotRequester(purchaseRequest, runnerId);
-        requireCredit(purchaseRequest, runner);
-        validateQuoteAmount(request.getQuoteAmount());
-
-        Optional<PurchaseRequestQuote> existingQuote = quoteRepository.findByPurchaseRequestIdAndRunnerId(requestId, runnerId);
-        if (existingQuote.isPresent()) {
-            PurchaseRequestQuote quote = existingQuote.get();
-            if (!QUOTE_CANCELLED.equals(quote.getStatus())) {
-                throw new RuntimeException("你已經對這張託購單報價");
-            }
-            quote.setQuoteAmount(request.getQuoteAmount());
-            quote.setNote(trimToNull(request.getNote()));
-            quote.setStatus(QUOTE_PENDING);
-            PurchaseRequestQuote savedQuote = quoteRepository.save(quote);
-            notificationService.sendNotification(
-                    purchaseRequest.getRequester(),
-                    "PURCHASE_QUOTED",
-                    purchaseRequest.getId(),
-                    runner.getDisplayName() + " 對你的託購「" + purchaseRequest.getProductName() + "」報價 " + savedQuote.getQuoteAmount() + " 元"
-            );
-            return toQuoteResponse(savedQuote);
-        }
-
-        PurchaseRequestQuote quote = PurchaseRequestQuote.builder()
-                .purchaseRequest(purchaseRequest)
-                .runner(runner)
-                .quoteAmount(request.getQuoteAmount())
-                .note(trimToNull(request.getNote()))
-                .status(QUOTE_PENDING)
+        // 先建立委託單，取得主鍵後才能保存面交快照。
+        PurchaseRequest purchaseRequest = PurchaseRequest.builder()
+                .requester(requester)
+                .itemName(request.getItemName().trim())
+                .itemDescription(request.getItemDescription())
+                .imageUrls(copyList(request.getImageUrls()))
+                .rewardType(rewardType)
+                .fixedRewardAmount("FIXED".equals(rewardType) ? request.getFixedRewardAmount() : null)
+                .requesterCity(request.getRequesterCity().trim())
+                .requesterDistrict(request.getRequesterDistrict())
+                .deliveryMethod(deliveryMethod)
+                .deliveryPublicSummary(request.getDeliveryPublicSummary().trim())
+                .deliveryPrivateDetail(FACE_TO_FACE.equals(deliveryMethod) ? null : request.getDeliveryPrivateDetail())
+                .requestExpireTime(request.getRequestExpireTime())
+                .deliveryDeadlineHours(request.getDeliveryDeadlineHours())
+                .minCreditScore(request.getMinCreditScore() == null ? 0 : request.getMinCreditScore())
+                .status("OPEN")
                 .build();
-        PurchaseRequestQuote savedQuote = quoteRepository.save(quote);
-        notificationService.sendNotification(
-                purchaseRequest.getRequester(),
-                "PURCHASE_QUOTED",
-                purchaseRequest.getId(),
-                runner.getDisplayName() + " 對你的託購「" + purchaseRequest.getProductName() + "」報價 " + savedQuote.getQuoteAmount() + " 元"
-        );
-        return toQuoteResponse(savedQuote);
-    }
+        purchaseRequestRepository.save(purchaseRequest);
 
-    @Transactional
-    public PurchaseQuoteResponse updateQuote(Long requestId, Long quoteId, Long runnerId, PurchaseQuoteRequest request) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireOpen(purchaseRequest);
-        PurchaseRequestQuote quote = findQuoteForRequest(requestId, quoteId);
-        if (!quote.getRunner().getId().equals(runnerId)) {
-            throw new RuntimeException("只能編輯自己的報價");
-        }
-        if (!QUOTE_PENDING.equals(quote.getStatus())) {
-            throw new RuntimeException("只有待確認報價可以編輯");
-        }
-        validateQuoteAmount(request.getQuoteAmount());
-        quote.setQuoteAmount(request.getQuoteAmount());
-        quote.setNote(trimToNull(request.getNote()));
-        PurchaseRequestQuote savedQuote = quoteRepository.save(quote);
-        notificationService.sendNotification(
-                purchaseRequest.getRequester(),
-                "PURCHASE_QUOTE_UPDATED",
-                purchaseRequest.getId(),
-                quote.getRunner().getDisplayName() + " 更新了託購「" + purchaseRequest.getProductName() + "」的報價為 " + savedQuote.getQuoteAmount() + " 元"
-        );
-        return toQuoteResponse(savedQuote);
-    }
-
-    @Transactional
-    public PurchaseQuoteResponse cancelQuote(Long requestId, Long quoteId, Long runnerId) {
-        PurchaseRequestQuote quote = findQuoteForRequest(requestId, quoteId);
-        if (!quote.getRunner().getId().equals(runnerId)) {
-            throw new RuntimeException("只能取消自己的報價");
-        }
-        if (!QUOTE_PENDING.equals(quote.getStatus())) {
-            throw new RuntimeException("只有待確認報價可以取消");
-        }
-        quote.setStatus(QUOTE_CANCELLED);
-        PurchaseRequestQuote savedQuote = quoteRepository.save(quote);
-        notificationService.sendNotification(
-                quote.getPurchaseRequest().getRequester(),
-                "PURCHASE_QUOTE_CANCELLED",
-                quote.getPurchaseRequest().getId(),
-                quote.getRunner().getDisplayName() + " 已取消對託購「" + quote.getPurchaseRequest().getProductName() + "」的報價"
-        );
-        return toQuoteResponse(savedQuote);
-    }
-
-    @Transactional(readOnly = true)
-    public List<PurchaseQuoteResponse> getQuotes(Long requestId, Long requesterId) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        return quoteRepository.findByPurchaseRequestIdOrderByCreatedAtDesc(requestId).stream()
-                .map(this::toQuoteResponse)
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public PurchaseQuoteResponse getMyQuote(Long requestId, Long runnerId) {
-        return quoteRepository.findByPurchaseRequestIdAndRunnerId(requestId, runnerId)
-                .map(this::toQuoteResponse)
-                .orElseThrow(() -> new RuntimeException("你尚未對這張託購單報價"));
-    }
-
-    @Transactional
-    public PurchaseRequestResponse acceptDirectly(Long requestId, Long runnerId) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        User runner = findUser(runnerId);
-        if (!REWARD_FIXED.equals(purchaseRequest.getRewardType())) {
-            throw new RuntimeException("這張託購單不是固定酬金模式");
-        }
-        requireOpen(purchaseRequest);
-        requireNotRequester(purchaseRequest, runnerId);
-        requireCredit(purchaseRequest, runner);
-
-        purchaseRequest.setAssignedRunner(runner);
-        purchaseRequest.setStatus(STATUS_ASSIGNED);
-        PurchaseRequest savedRequest = purchaseRequestRepository.save(purchaseRequest);
-        notificationService.sendNotification(
-                purchaseRequest.getRequester(),
-                "PURCHASE_ACCEPTED",
-                purchaseRequest.getId(),
-                runner.getDisplayName() + " 已承接你的託購「" + purchaseRequest.getProductName() + "」"
-        );
-        return toResponse(savedRequest, runnerId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse acceptQuote(Long requestId, Long quoteId, Long requesterId) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        requireOpen(purchaseRequest);
-        requireQuoteMode(purchaseRequest);
-
-        PurchaseRequestQuote quote = findQuoteForRequest(requestId, quoteId);
-        if (!QUOTE_PENDING.equals(quote.getStatus())) {
-            throw new RuntimeException("只能接受待確認報價");
-        }
-        requireCredit(purchaseRequest, quote.getRunner());
-
-        List<PurchaseRequestQuote> rejectedQuotes = quoteRepository.findByPurchaseRequestIdOrderByCreatedAtDesc(requestId).stream()
-                .filter(candidate -> !candidate.getId().equals(quoteId))
-                .filter(candidate -> QUOTE_PENDING.equals(candidate.getStatus()))
-                .toList();
-
-        quote.setStatus(QUOTE_ACCEPTED);
-        quoteRepository.save(quote);
-        quoteRepository.rejectOtherPendingQuotes(requestId, quoteId);
-
-        purchaseRequest.setAcceptedQuote(quote);
-        purchaseRequest.setAssignedRunner(quote.getRunner());
-        purchaseRequest.setStatus(STATUS_ASSIGNED);
-        PurchaseRequest savedRequest = purchaseRequestRepository.save(purchaseRequest);
-
-        notificationService.sendNotification(
-                quote.getRunner(),
-                "PURCHASE_QUOTE_ACCEPTED",
-                purchaseRequest.getId(),
-                "委託人已接受你對「" + purchaseRequest.getProductName() + "」的報價"
-        );
-        for (PurchaseRequestQuote rejectedQuote : rejectedQuotes) {
-            notificationService.sendNotification(
-                    rejectedQuote.getRunner(),
-                    "PURCHASE_QUOTE_REJECTED",
-                    purchaseRequest.getId(),
-                    "委託人已選擇其他跑腿者承接「" + purchaseRequest.getProductName() + "」"
+        // 面交資料必須複製成委託單快照，避免常用資料日後修改而改變既有委託。
+        if (FACE_TO_FACE.equals(deliveryMethod)) {
+            replaceMeetupRanges(
+                    purchaseRequest,
+                    requester,
+                    request.getSelectedProfileIds(),
+                    request.getManualMeetupRanges(),
+                    Boolean.TRUE.equals(request.getSaveManualToProfile())
             );
+        } else if (Boolean.TRUE.equals(request.getSaveDeliveryToProfile())) {
+            saveDeliveryProfile(requester, purchaseRequest);
         }
 
-        return toResponse(savedRequest, requesterId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse deliver(Long requestId, Long runnerId) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        if (purchaseRequest.getAssignedRunner() == null || !purchaseRequest.getAssignedRunner().getId().equals(runnerId)) {
-            throw new RuntimeException("只有承接的跑腿者可以標記已交付");
-        }
-        if (!STATUS_ASSIGNED.equals(purchaseRequest.getStatus())) {
-            throw new RuntimeException("只有已成立的託購單可以標記已交付");
-        }
-        purchaseRequest.setStatus(STATUS_DELIVERED);
-        purchaseRequest.setDeliveredAt(LocalDateTime.now());
-        PurchaseRequest savedRequest = purchaseRequestRepository.save(purchaseRequest);
-        notificationService.sendNotification(
-                purchaseRequest.getRequester(),
-                "PURCHASE_DELIVERED",
-                purchaseRequest.getId(),
-                purchaseRequest.getAssignedRunner().getDisplayName() + " 已標記託購「" + purchaseRequest.getProductName() + "」為已交付"
-        );
-        return toResponse(savedRequest, runnerId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse complete(Long requestId, Long requesterId) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        if (!STATUS_ASSIGNED.equals(purchaseRequest.getStatus()) && !STATUS_DELIVERED.equals(purchaseRequest.getStatus())) {
-            throw new RuntimeException("只有已成立或已交付的託購單可以完成");
-        }
-        purchaseRequest.setStatus(STATUS_COMPLETED);
-        purchaseRequest.setCompletedAt(LocalDateTime.now());
-        PurchaseRequest savedRequest = purchaseRequestRepository.save(purchaseRequest);
-        if (purchaseRequest.getAssignedRunner() != null) {
-            notificationService.sendNotification(
-                    purchaseRequest.getAssignedRunner(),
-                    "PURCHASE_COMPLETED",
-                    purchaseRequest.getId(),
-                    "委託人已確認完成託購「" + purchaseRequest.getProductName() + "」"
-            );
-        }
-        return toResponse(savedRequest, requesterId);
-    }
-
-    @Transactional
-    public PurchaseRequestResponse cancel(Long requestId, Long requesterId, CancelPurchaseRequestRequest request) {
-        PurchaseRequest purchaseRequest = findRequest(requestId);
-        requireRequester(purchaseRequest, requesterId);
-        requireOpen(purchaseRequest);
-        List<PurchaseRequestQuote> pendingQuotes = quoteRepository.findByPurchaseRequestIdOrderByCreatedAtDesc(requestId).stream()
-                .filter(quote -> QUOTE_PENDING.equals(quote.getStatus()))
-                .toList();
-        purchaseRequest.setStatus(STATUS_CANCELLED);
-        purchaseRequest.setCancelReason(request == null ? null : trimToNull(request.getReason()));
-        PurchaseRequest savedRequest = purchaseRequestRepository.save(purchaseRequest);
-        for (PurchaseRequestQuote quote : pendingQuotes) {
-            notificationService.sendNotification(
-                    quote.getRunner(),
-                    "PURCHASE_CANCELLED",
-                    purchaseRequest.getId(),
-                    "委託人已取消託購「" + purchaseRequest.getProductName() + "」"
-            );
-        }
-        return toResponse(savedRequest, requesterId);
+        return purchaseRequest.getId();
     }
 
     @Transactional(readOnly = true)
-    public Page<PurchaseRequestResponse> getMyCreated(Long userId, Pageable pageable) {
-        return purchaseRequestRepository.findByRequesterIdOrderByCreatedAtDesc(userId, pageable)
-                .map(request -> toResponse(request, userId));
+    public Page<PurchaseRequestSummaryResponse> list(
+            String status,
+            String city,
+            String district,
+            String deliveryMethod,
+            String rewardType,
+            String keyword,
+            int page,
+            int size
+    ) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new RuntimeException("分頁參數不合法，size 必須介於 1 到 100");
+        }
+
+        String normalizedStatus = normalizeOptional(status);
+        String normalizedDelivery = normalizeOptional(deliveryMethod);
+        String normalizedReward = normalizeOptional(rewardType);
+        validateOptionalEnum(normalizedStatus, REQUEST_STATUSES, "委託單狀態");
+        validateOptionalEnum(normalizedDelivery, DELIVERY_METHODS, "交付方式");
+        validateOptionalEnum(normalizedReward, REWARD_TYPES, "酬金模式");
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return purchaseRequestRepository.findWithFilters(
+                normalizedStatus,
+                blankToNull(city),
+                blankToNull(district),
+                normalizedDelivery,
+                normalizedReward,
+                blankToNull(keyword),
+                LocalDateTime.now(),
+                pageable
+        ).map(this::toSummaryResponse);
     }
 
     @Transactional(readOnly = true)
-    public Page<PurchaseRequestResponse> getMyAssigned(Long userId, Pageable pageable) {
-        return purchaseRequestRepository.findByAssignedRunnerIdOrderByCreatedAtDesc(userId, pageable)
-                .map(request -> toResponse(request, userId));
+    public Page<PurchaseRequestSummaryResponse> listMyCreated(
+            Long userId,
+            String status,
+            int page,
+            int size
+    ) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new RuntimeException("分頁參數不合法，size 必須介於 1 到 100");
+        }
+        String normalizedStatus = normalizeOptional(status);
+        validateOptionalEnum(normalizedStatus, REQUEST_STATUSES, "委託單狀態");
+        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        return purchaseRequestRepository.findCreatedByUser(userId, normalizedStatus, pageable)
+                .map(this::toSummaryResponse);
     }
 
     @Transactional(readOnly = true)
-    public Page<PurchaseRequestResponse> getMyQuoted(Long userId, Pageable pageable) {
-        return purchaseRequestRepository.findQuotedByRunnerId(userId, pageable)
-                .map(request -> toResponse(request, userId));
+    public PurchaseRequestDetailResponse getDetail(Long requestId, Long currentUserId) {
+        PurchaseRequest purchaseRequest = findRequest(requestId);
+        List<PurchaseRequestMeetupRange> ranges = FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
+                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(requestId)
+                : List.of();
+
+        // 私密交付資料只有訂單成立後的交易雙方可讀取；公開詳情一律隱藏。
+        Map<String, Object> privateDetail = null;
+        if (currentUserId != null) {
+            privateDetail = orderRepository.findFirstByPurchaseRequestIdOrderByCreatedAtDesc(requestId)
+                    .filter(order -> isOrderParty(order, currentUserId))
+                    .map(order -> purchaseRequest.getDeliveryPrivateDetail())
+                    .orElse(null);
+        }
+        return toDetailResponse(purchaseRequest, ranges, privateDetail);
+    }
+
+    @Transactional
+    public PurchaseRequestDetailResponse update(Long userId, Long requestId, UpdatePurchaseRequestRequest request) {
+        PurchaseRequest purchaseRequest = findOwnedRequest(userId, requestId);
+        if (!Set.of("OPEN", "QUOTING").contains(purchaseRequest.getStatus())) {
+            throw new RuntimeException("目前委託單狀態不可修改");
+        }
+
+        boolean hasActiveQuote = quoteRepository.existsByPurchaseRequestIdAndStatus(requestId, "ACTIVE");
+        if ("QUOTING".equals(purchaseRequest.getStatus()) || hasActiveQuote) {
+            if (request.hasNonExpiryChanges() || request.getRequestExpireTime() == null) {
+                throw new RuntimeException("已有有效報價後只允許延長委託期限");
+            }
+            extendDeadline(purchaseRequest, request.getRequestExpireTime());
+        } else {
+            applyOpenRequestChanges(purchaseRequest, request);
+            validatePersistedRequest(purchaseRequest);
+
+            boolean meetupChanged = request.getSelectedProfileIds() != null
+                    || request.getManualMeetupRanges() != null;
+            if (FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())) {
+                if (meetupChanged) {
+                    replaceMeetupRanges(
+                            purchaseRequest,
+                            purchaseRequest.getRequester(),
+                            request.getSelectedProfileIds(),
+                            request.getManualMeetupRanges(),
+                            Boolean.TRUE.equals(request.getSaveManualToProfile())
+                    );
+                } else if (meetupRangeRepository.countByPurchaseRequestId(requestId) == 0) {
+                    throw new RuntimeException("面交委託至少需要一筆面交範圍");
+                }
+                purchaseRequest.setDeliveryPrivateDetail(null);
+            } else {
+                meetupRangeRepository.deleteByPurchaseRequestId(requestId);
+                if (Boolean.TRUE.equals(request.getSaveDeliveryToProfile())) {
+                    saveDeliveryProfile(purchaseRequest.getRequester(), purchaseRequest);
+                }
+            }
+        }
+
+        purchaseRequestRepository.save(purchaseRequest);
+        List<PurchaseRequestMeetupRange> ranges = FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
+                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(requestId)
+                : List.of();
+        return toDetailResponse(purchaseRequest, ranges, null);
+    }
+
+    @Transactional
+    public void cancel(Long userId, Long requestId) {
+        PurchaseRequest purchaseRequest = findOwnedRequest(userId, requestId);
+        if (!Set.of("OPEN", "QUOTING").contains(purchaseRequest.getStatus())) {
+            throw new RuntimeException("只有開放中或報價中的委託單可以取消");
+        }
+
+        // 取消委託時一併使所有有效報價失效，不產生信用扣分。
+        purchaseRequest.setStatus("CANCELLED");
+        purchaseRequest.setCancelledAt(LocalDateTime.now());
+        quoteRepository.expireActiveQuotes(requestId);
+        purchaseRequestRepository.save(purchaseRequest);
+    }
+
+    @Transactional
+    public PurchaseRequestDetailResponse extend(Long userId, Long requestId, LocalDateTime newExpireTime) {
+        PurchaseRequest purchaseRequest = findOwnedRequest(userId, requestId);
+        if (!Set.of("OPEN", "QUOTING").contains(purchaseRequest.getStatus())) {
+            throw new RuntimeException("目前委託單狀態不可延長期限");
+        }
+        extendDeadline(purchaseRequest, newExpireTime);
+        purchaseRequestRepository.save(purchaseRequest);
+
+        List<PurchaseRequestMeetupRange> ranges = FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
+                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(requestId)
+                : List.of();
+        return toDetailResponse(purchaseRequest, ranges, null);
+    }
+
+    @Transactional
+    public int expirePurchaseRequests() {
+        List<PurchaseRequest> expired = purchaseRequestRepository
+                .findByStatusInAndRequestExpireTimeBefore(List.of("OPEN", "QUOTING"), LocalDateTime.now());
+        int processed = 0;
+        for (PurchaseRequest candidate : expired) {
+            PurchaseRequest request = purchaseRequestRepository.findByIdForUpdate(candidate.getId())
+                    .orElse(null);
+            if (request == null || !Set.of("OPEN", "QUOTING").contains(request.getStatus())
+                    || request.getRequestExpireTime().isAfter(LocalDateTime.now())) {
+                continue;
+            }
+            request.setStatus("EXPIRED");
+            request.setExpiredAt(LocalDateTime.now());
+            purchaseRequestRepository.save(request);
+            List<PurchaseQuote> activeQuotes = quoteRepository
+                    .findByPurchaseRequestIdAndStatus(request.getId(), "ACTIVE");
+            activeQuotes.forEach(quote -> quote.setStatus("EXPIRED"));
+            quoteRepository.saveAll(activeQuotes);
+            notificationService.sendNotification(request.getRequester(), "PURCHASE_REQUEST_EXPIRED",
+                    request.getId(), "託購委託已到期");
+            activeQuotes.forEach(quote -> notificationService.sendNotification(quote.getQuoter(),
+                    "PURCHASE_QUOTE_EXPIRED", request.getId(), "您參與報價的託購已到期"));
+            processed++;
+        }
+        return processed;
+    }
+
+    private void validateCreateRequest(
+            CreatePurchaseRequestRequest request,
+            String rewardType,
+            String deliveryMethod
+    ) {
+        if (!REWARD_TYPES.contains(rewardType)) {
+            throw new RuntimeException("不支援的酬金模式: " + rewardType);
+        }
+        if (!DELIVERY_METHODS.contains(deliveryMethod)) {
+            throw new RuntimeException("不支援的交付方式: " + deliveryMethod);
+        }
+        if ("FIXED".equals(rewardType)
+                && (request.getFixedRewardAmount() == null || request.getFixedRewardAmount() <= 0)) {
+            throw new RuntimeException("固定酬金模式必須提供大於 0 的酬金");
+        }
+        if (request.getRequestExpireTime() == null || !request.getRequestExpireTime().isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("委託期限必須是未來時間");
+        }
+        if (request.getDeliveryDeadlineHours() == null || request.getDeliveryDeadlineHours() <= 0) {
+            throw new RuntimeException("交貨期限時數必須大於 0");
+        }
+        if (request.getMinCreditScore() != null && request.getMinCreditScore() < 0) {
+            throw new RuntimeException("最低信用分不可小於 0");
+        }
+
+        boolean hasSelectedProfiles = request.getSelectedProfileIds() != null
+                && !request.getSelectedProfileIds().isEmpty();
+        boolean hasManualRanges = request.getManualMeetupRanges() != null
+                && !request.getManualMeetupRanges().isEmpty();
+        if (FACE_TO_FACE.equals(deliveryMethod) && !hasSelectedProfiles && !hasManualRanges) {
+            throw new RuntimeException("面交委託至少需要一筆面交範圍");
+        }
+        if (!FACE_TO_FACE.equals(deliveryMethod)
+                && (request.getDeliveryPrivateDetail() == null || request.getDeliveryPrivateDetail().isEmpty())) {
+            throw new RuntimeException("宅配或店到店必須提供私密交付資料");
+        }
+    }
+
+    private void applyOpenRequestChanges(PurchaseRequest purchaseRequest, UpdatePurchaseRequestRequest request) {
+        if (request.getItemName() != null) {
+            purchaseRequest.setItemName(request.getItemName().trim());
+        }
+        if (request.getItemDescription() != null) {
+            purchaseRequest.setItemDescription(request.getItemDescription());
+        }
+        if (request.getImageUrls() != null) {
+            purchaseRequest.setImageUrls(copyList(request.getImageUrls()));
+        }
+        if (request.getRewardType() != null) {
+            purchaseRequest.setRewardType(normalizeRequired(request.getRewardType(), "酬金模式不可空白"));
+        }
+        if (request.getFixedRewardAmount() != null) {
+            purchaseRequest.setFixedRewardAmount(request.getFixedRewardAmount());
+        }
+        if (request.getRequesterCity() != null) {
+            purchaseRequest.setRequesterCity(request.getRequesterCity().trim());
+        }
+        if (request.getRequesterDistrict() != null) {
+            purchaseRequest.setRequesterDistrict(request.getRequesterDistrict());
+        }
+        if (request.getDeliveryMethod() != null) {
+            purchaseRequest.setDeliveryMethod(normalizeRequired(request.getDeliveryMethod(), "交付方式不可空白"));
+        }
+        if (request.getDeliveryPublicSummary() != null) {
+            purchaseRequest.setDeliveryPublicSummary(request.getDeliveryPublicSummary().trim());
+        }
+        if (request.getDeliveryPrivateDetail() != null) {
+            purchaseRequest.setDeliveryPrivateDetail(request.getDeliveryPrivateDetail());
+        }
+        if (request.getRequestExpireTime() != null) {
+            if (!request.getRequestExpireTime().isAfter(LocalDateTime.now())) {
+                throw new RuntimeException("委託期限必須是未來時間");
+            }
+            purchaseRequest.setRequestExpireTime(request.getRequestExpireTime());
+        }
+        if (request.getDeliveryDeadlineHours() != null) {
+            purchaseRequest.setDeliveryDeadlineHours(request.getDeliveryDeadlineHours());
+        }
+        if (request.getMinCreditScore() != null) {
+            purchaseRequest.setMinCreditScore(request.getMinCreditScore());
+        }
+        if ("QUOTE".equals(purchaseRequest.getRewardType())) {
+            purchaseRequest.setFixedRewardAmount(null);
+        }
+    }
+
+    private void validatePersistedRequest(PurchaseRequest purchaseRequest) {
+        if (purchaseRequest.getItemName() == null || purchaseRequest.getItemName().isBlank()) {
+            throw new RuntimeException("商品名稱不可空白");
+        }
+        validateOptionalEnum(purchaseRequest.getRewardType(), REWARD_TYPES, "酬金模式");
+        validateOptionalEnum(purchaseRequest.getDeliveryMethod(), DELIVERY_METHODS, "交付方式");
+        if ("FIXED".equals(purchaseRequest.getRewardType())
+                && (purchaseRequest.getFixedRewardAmount() == null || purchaseRequest.getFixedRewardAmount() <= 0)) {
+            throw new RuntimeException("固定酬金模式必須提供大於 0 的酬金");
+        }
+        if (purchaseRequest.getDeliveryDeadlineHours() == null || purchaseRequest.getDeliveryDeadlineHours() <= 0) {
+            throw new RuntimeException("交貨期限時數必須大於 0");
+        }
+        if (purchaseRequest.getMinCreditScore() == null || purchaseRequest.getMinCreditScore() < 0) {
+            throw new RuntimeException("最低信用分不可小於 0");
+        }
+        if (!FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
+                && (purchaseRequest.getDeliveryPrivateDetail() == null
+                || purchaseRequest.getDeliveryPrivateDetail().isEmpty())) {
+            throw new RuntimeException("宅配或店到店必須提供私密交付資料");
+        }
+    }
+
+    private void replaceMeetupRanges(
+            PurchaseRequest purchaseRequest,
+            User requester,
+            List<Long> selectedProfileIds,
+            List<MeetupRangeRequest> manualRanges,
+            boolean saveManualToProfile
+    ) {
+        List<Long> profileIds = selectedProfileIds == null
+                ? List.of()
+                : new ArrayList<>(new LinkedHashSet<>(selectedProfileIds));
+        List<MeetupRangeRequest> ranges = manualRanges == null ? List.of() : manualRanges;
+        if (profileIds.isEmpty() && ranges.isEmpty()) {
+            throw new RuntimeException("面交委託至少需要一筆面交範圍");
+        }
+
+        List<UserDeliveryProfile> profiles = profileRepository.findAllById(profileIds);
+        if (profiles.size() != profileIds.size()) {
+            throw new RuntimeException("部分常用交付資料不存在");
+        }
+        for (UserDeliveryProfile profile : profiles) {
+            if (!profile.getUser().getId().equals(requester.getId())) {
+                throw new RuntimeException("不可使用其他使用者的常用交付資料");
+            }
+            if (!FACE_TO_FACE.equals(profile.getProfileType())) {
+                throw new RuntimeException("面交委託只能選用面交類型的常用資料");
+            }
+        }
+        for (MeetupRangeRequest range : ranges) {
+            validateMeetupRange(range);
+        }
+
+        meetupRangeRepository.deleteByPurchaseRequestId(purchaseRequest.getId());
+        List<PurchaseRequestMeetupRange> snapshots = new ArrayList<>();
+        profiles.forEach(profile -> snapshots.add(snapshotFromProfile(purchaseRequest, profile)));
+        ranges.forEach(range -> snapshots.add(snapshotFromManual(purchaseRequest, range)));
+        meetupRangeRepository.saveAll(snapshots);
+
+        // 使用者明確選擇保存時，才將手動面交資料另存為可重複使用的模板。
+        if (saveManualToProfile) {
+            ranges.forEach(range -> profileRepository.save(profileFromManual(requester, range)));
+        }
+    }
+
+    private void validateMeetupRange(MeetupRangeRequest range) {
+        if (range == null) {
+            throw new RuntimeException("面交範圍不可為空");
+        }
+        String locationType = normalizeRequired(range.getLocationType(), "面交地點類型不可空白");
+        if (!MEETUP_LOCATION_TYPES.contains(locationType)) {
+            throw new RuntimeException("不支援的面交地點類型: " + locationType);
+        }
+        if (range.getDisplayText() == null || range.getDisplayText().isBlank()) {
+            throw new RuntimeException("面交顯示文字不可空白");
+        }
+    }
+
+    private PurchaseRequestMeetupRange snapshotFromProfile(
+            PurchaseRequest purchaseRequest,
+            UserDeliveryProfile profile
+    ) {
+        return PurchaseRequestMeetupRange.builder()
+                .purchaseRequest(purchaseRequest)
+                .sourceProfile(profile)
+                .locationType(profile.getLocationType())
+                .city(profile.getCity())
+                .district(profile.getDistrict())
+                .locationName(profile.getLocationName())
+                .rangeStart(profile.getRangeStart())
+                .rangeEnd(profile.getRangeEnd())
+                .displayText(profile.getDisplayText())
+                .detail(profile.getDetail())
+                .build();
+    }
+
+    private PurchaseRequestMeetupRange snapshotFromManual(
+            PurchaseRequest purchaseRequest,
+            MeetupRangeRequest range
+    ) {
+        return PurchaseRequestMeetupRange.builder()
+                .purchaseRequest(purchaseRequest)
+                .locationType(normalizeRequired(range.getLocationType(), "面交地點類型不可空白"))
+                .city(range.getCity())
+                .district(range.getDistrict())
+                .locationName(range.getLocationName())
+                .rangeStart(range.getRangeStart())
+                .rangeEnd(range.getRangeEnd())
+                .displayText(range.getDisplayText().trim())
+                .detail(range.getDetail())
+                .latitude(range.getLatitude())
+                .longitude(range.getLongitude())
+                .build();
+    }
+
+    private UserDeliveryProfile profileFromManual(User requester, MeetupRangeRequest range) {
+        return UserDeliveryProfile.builder()
+                .user(requester)
+                .profileType(FACE_TO_FACE)
+                .locationType(normalizeRequired(range.getLocationType(), "面交地點類型不可空白"))
+                .city(range.getCity())
+                .district(range.getDistrict())
+                .locationName(range.getLocationName())
+                .rangeStart(range.getRangeStart())
+                .rangeEnd(range.getRangeEnd())
+                .displayText(range.getDisplayText().trim())
+                .detail(range.getDetail())
+                .isDefault(false)
+                .build();
+    }
+
+    private void saveDeliveryProfile(User requester, PurchaseRequest purchaseRequest) {
+        UserDeliveryProfile profile = UserDeliveryProfile.builder()
+                .user(requester)
+                .profileType(purchaseRequest.getDeliveryMethod())
+                .locationType("HOME_DELIVERY".equals(purchaseRequest.getDeliveryMethod()) ? "ADDRESS" : "STORE")
+                .city(purchaseRequest.getRequesterCity())
+                .district(purchaseRequest.getRequesterDistrict())
+                .displayText(purchaseRequest.getDeliveryPublicSummary())
+                .detail(purchaseRequest.getDeliveryPrivateDetail())
+                .isDefault(false)
+                .build();
+        profileRepository.save(profile);
+    }
+
+    private void extendDeadline(PurchaseRequest purchaseRequest, LocalDateTime newExpireTime) {
+        if (newExpireTime == null || !newExpireTime.isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("新委託期限必須是未來時間");
+        }
+        if (!newExpireTime.isAfter(purchaseRequest.getRequestExpireTime())) {
+            throw new RuntimeException("新委託期限必須晚於原期限");
+        }
+        purchaseRequest.setRequestExpireTime(newExpireTime);
     }
 
     private PurchaseRequest findRequest(Long requestId) {
         return purchaseRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("找不到託購單"));
+                .orElseThrow(() -> new RuntimeException("找不到委託單"));
     }
 
-    private PurchaseRequestQuote findQuoteForRequest(Long requestId, Long quoteId) {
-        PurchaseRequestQuote quote = quoteRepository.findById(quoteId)
-                .orElseThrow(() -> new RuntimeException("找不到報價"));
-        if (!quote.getPurchaseRequest().getId().equals(requestId)) {
-            throw new RuntimeException("報價不屬於這張託購單");
-        }
-        return quote;
-    }
-
-    private User findUser(Long userId) {
-        return userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("找不到使用者"));
-    }
-
-    private void requireRequester(PurchaseRequest purchaseRequest, Long userId) {
+    private PurchaseRequest findOwnedRequest(Long userId, Long requestId) {
+        PurchaseRequest purchaseRequest = findRequest(requestId);
         if (!purchaseRequest.getRequester().getId().equals(userId)) {
-            throw new RuntimeException("只有委託人可以執行這個操作");
+            throw new RuntimeException("只有委託人可以操作此委託單");
         }
+        return purchaseRequest;
     }
 
-    private void requireNotRequester(PurchaseRequest purchaseRequest, Long userId) {
-        if (purchaseRequest.getRequester().getId().equals(userId)) {
-            throw new RuntimeException("不能承接或報價自己的託購單");
-        }
+    private boolean isOrderParty(PurchaseOrder order, Long userId) {
+        return order.getRequester().getId().equals(userId) || order.getRunner().getId().equals(userId);
     }
 
-    private void requireOpen(PurchaseRequest purchaseRequest) {
-        if (!STATUS_OPEN.equals(purchaseRequest.getStatus())) {
-            throw new RuntimeException("託購單目前不是開放狀態");
-        }
-        if (purchaseRequest.getDeadlineAt() != null && purchaseRequest.getDeadlineAt().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("託購單已超過委託期限");
-        }
-    }
-
-    private void requireQuoteMode(PurchaseRequest purchaseRequest) {
-        if (!REWARD_QUOTE.equals(purchaseRequest.getRewardType())) {
-            throw new RuntimeException("這張託購單不是報價模式");
-        }
-    }
-
-    private void requireCredit(PurchaseRequest purchaseRequest, User runner) {
-        Integer minCreditScore = purchaseRequest.getMinCreditScore();
-        if (minCreditScore != null && runner.getCreditScore() < minCreditScore) {
-            throw new RuntimeException("信用分未達託購單限制");
-        }
-    }
-
-    private void validateRequestFields(String productName, String rewardType, BigDecimal fixedRewardAmount, String deliveryMethod) {
-        if (productName == null || productName.trim().isEmpty()) {
-            throw new RuntimeException("商品名稱必填");
-        }
-        String normalizedRewardType = rewardType == null ? null : rewardType.trim().toUpperCase();
-        if (!REWARD_FIXED.equals(normalizedRewardType) && !REWARD_QUOTE.equals(normalizedRewardType)) {
-            throw new RuntimeException("酬金模式必須是 FIXED 或 QUOTE");
-        }
-        if (REWARD_FIXED.equals(normalizedRewardType) && (fixedRewardAmount == null || fixedRewardAmount.compareTo(BigDecimal.ZERO) < 0)) {
-            throw new RuntimeException("固定酬金不可為空或小於 0");
-        }
-        if (deliveryMethod == null || deliveryMethod.trim().isEmpty()) {
-            throw new RuntimeException("交貨方式必填");
-        }
-    }
-
-    private void validateQuoteAmount(BigDecimal quoteAmount) {
-        if (quoteAmount == null || quoteAmount.compareTo(BigDecimal.ZERO) < 0) {
-            throw new RuntimeException("報價金額不可為空或小於 0");
-        }
-    }
-
-    private BigDecimal normalizeFixedReward(String rewardType, BigDecimal fixedRewardAmount) {
-        return REWARD_FIXED.equals(rewardType == null ? null : rewardType.trim().toUpperCase()) ? fixedRewardAmount : null;
-    }
-
-    private String normalizeDeliveryTimeType(String value) {
-        String normalized = normalizeOptional(value);
-        return normalized == null ? "DISCUSS" : normalized;
-    }
-
-    private String normalizeOptional(String value) {
-        String trimmed = trimToNull(value);
-        return trimmed == null ? null : trimmed.toUpperCase();
-    }
-
-    private String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
-    }
-
-    private List<String> saveImages(List<MultipartFile> images, int currentCount) {
-        if (images == null || images.isEmpty()) {
-            return new ArrayList<>();
-        }
-        if (currentCount + images.size() > 3) {
-            throw new RuntimeException("商品圖片最多 3 張");
-        }
-
-        File dir = new File(uploadDir);
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw new RuntimeException("無法建立圖片上傳目錄");
-        }
-
-        List<String> savedFileNames = new ArrayList<>();
-        try {
-            for (MultipartFile file : images) {
-                if (file == null || file.isEmpty()) {
-                    continue;
-                }
-                String originalFilename = file.getOriginalFilename();
-                String extension = (originalFilename != null && originalFilename.contains("."))
-                        ? originalFilename.substring(originalFilename.lastIndexOf("."))
-                        : ".jpg";
-                String newFileName = UUID.randomUUID() + extension;
-                File destinationFile = new File(dir, newFileName);
-                Thumbnails.of(file.getInputStream())
-                        .size(1080, 1080)
-                        .toFile(destinationFile);
-                savedFileNames.add(newFileName);
-            }
-            return savedFileNames;
-        } catch (Exception e) {
-            deleteSavedFiles(savedFileNames);
-            throw new RuntimeException("圖片上傳失敗: " + e.getMessage());
-        }
-    }
-
-    private void deleteSavedFiles(List<String> savedFileNames) {
-        for (String fileName : savedFileNames) {
-            File fileToDelete = new File(uploadDir, fileName);
-            if (fileToDelete.exists() && !fileToDelete.delete()) {
-                log.warn("Failed to delete purchase request image {}", fileName);
-            }
-        }
-    }
-
-    private List<String> parseImageNames(String imageUrls) {
-        if (imageUrls == null || imageUrls.trim().isEmpty()) {
-            return new ArrayList<>();
-        }
-        return Arrays.stream(imageUrls.split(","))
-                .map(this::extractFileName)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toCollection(ArrayList::new));
-    }
-
-    private String extractFileName(String value) {
-        String trimmed = trimToNull(value);
-        if (trimmed == null) {
-            return null;
-        }
-        int slashIndex = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
-        return slashIndex >= 0 ? trimmed.substring(slashIndex + 1) : trimmed;
-    }
-
-    private PurchaseRequestResponse toResponse(PurchaseRequest purchaseRequest, Long currentUserId) {
-        long quoteCount = quoteRepository.countByPurchaseRequestIdAndStatus(purchaseRequest.getId(), QUOTE_PENDING);
-        User currentUser = currentUserId == null ? null : userRepository.findById(currentUserId).orElse(null);
-        String blockedReason = getActBlockedReason(purchaseRequest, currentUser);
-        boolean isOpen = STATUS_OPEN.equals(purchaseRequest.getStatus());
-        boolean isRequester = currentUserId != null && purchaseRequest.getRequester().getId().equals(currentUserId);
-
-        return PurchaseRequestResponse.builder()
+    private PurchaseRequestSummaryResponse toSummaryResponse(PurchaseRequest purchaseRequest) {
+        User requester = purchaseRequest.getRequester();
+        return PurchaseRequestSummaryResponse.builder()
                 .id(purchaseRequest.getId())
-                .productName(purchaseRequest.getProductName())
-                .imageUrls(parseImageNames(purchaseRequest.getImageUrls()).stream()
-                        .map(fileName -> baseUrl + "/images/" + fileName)
-                        .toList())
+                .requesterId(requester.getId())
+                .requesterDisplayName(requester.getDisplayName())
+                .itemName(purchaseRequest.getItemName())
+                .imageUrls(copyList(purchaseRequest.getImageUrls()))
                 .rewardType(purchaseRequest.getRewardType())
                 .fixedRewardAmount(purchaseRequest.getFixedRewardAmount())
-                .quoteCount(quoteCount)
+                .requesterCity(purchaseRequest.getRequesterCity())
+                .requesterDistrict(purchaseRequest.getRequesterDistrict())
                 .deliveryMethod(purchaseRequest.getDeliveryMethod())
-                .requestArea(purchaseRequest.getRequestArea())
-                .deadlineAt(purchaseRequest.getDeadlineAt())
-                .deliveryTimeType(purchaseRequest.getDeliveryTimeType())
-                .deliveryTimeNote(purchaseRequest.getDeliveryTimeNote())
+                .deliveryPublicSummary(purchaseRequest.getDeliveryPublicSummary())
+                .requestExpireTime(purchaseRequest.getRequestExpireTime())
+                .deliveryDeadlineHours(purchaseRequest.getDeliveryDeadlineHours())
                 .minCreditScore(purchaseRequest.getMinCreditScore())
-                .description(purchaseRequest.getDescription())
                 .status(purchaseRequest.getStatus())
-                .requester(toUserSummary(purchaseRequest.getRequester()))
-                .assignedRunner(toUserSummary(purchaseRequest.getAssignedRunner()))
-                .acceptedQuoteId(purchaseRequest.getAcceptedQuote() == null ? null : purchaseRequest.getAcceptedQuote().getId())
-                .chatRoomId(purchaseRequest.getChatRoomId())
-                .canQuote(isOpen && REWARD_QUOTE.equals(purchaseRequest.getRewardType()) && blockedReason == null)
-                .canAcceptDirectly(isOpen && REWARD_FIXED.equals(purchaseRequest.getRewardType()) && blockedReason == null)
-                .canEdit(isOpen && isRequester)
-                .actBlockedReason(blockedReason)
-                .deliveredAt(purchaseRequest.getDeliveredAt())
-                .completedAt(purchaseRequest.getCompletedAt())
+                .createdAt(purchaseRequest.getCreatedAt())
+                .build();
+    }
+
+    private PurchaseRequestDetailResponse toDetailResponse(
+            PurchaseRequest purchaseRequest,
+            List<PurchaseRequestMeetupRange> ranges,
+            Map<String, Object> privateDetail
+    ) {
+        User requester = purchaseRequest.getRequester();
+        return PurchaseRequestDetailResponse.builder()
+                .id(purchaseRequest.getId())
+                .requesterId(requester.getId())
+                .requesterDisplayName(requester.getDisplayName())
+                .requesterProfileImageUrl(requester.getProfileImageUrl())
+                .requesterCreditScore(requester.getCreditScore())
+                .itemName(purchaseRequest.getItemName())
+                .itemDescription(purchaseRequest.getItemDescription())
+                .imageUrls(copyList(purchaseRequest.getImageUrls()))
+                .rewardType(purchaseRequest.getRewardType())
+                .fixedRewardAmount(purchaseRequest.getFixedRewardAmount())
+                .requesterCity(purchaseRequest.getRequesterCity())
+                .requesterDistrict(purchaseRequest.getRequesterDistrict())
+                .deliveryMethod(purchaseRequest.getDeliveryMethod())
+                .deliveryPublicSummary(purchaseRequest.getDeliveryPublicSummary())
+                .deliveryPrivateDetail(privateDetail)
+                .meetupRanges(ranges.stream().map(this::toMeetupRangeResponse).toList())
+                .requestExpireTime(purchaseRequest.getRequestExpireTime())
+                .deliveryDeadlineHours(purchaseRequest.getDeliveryDeadlineHours())
+                .minCreditScore(purchaseRequest.getMinCreditScore())
+                .status(purchaseRequest.getStatus())
+                .reopenCount(purchaseRequest.getReopenCount())
+                .cancelledAt(purchaseRequest.getCancelledAt())
+                .expiredAt(purchaseRequest.getExpiredAt())
                 .createdAt(purchaseRequest.getCreatedAt())
                 .updatedAt(purchaseRequest.getUpdatedAt())
                 .build();
     }
 
-    private String getActBlockedReason(PurchaseRequest purchaseRequest, User currentUser) {
-        if (currentUser == null) {
-            return "LOGIN_REQUIRED";
-        }
-        if (purchaseRequest.getRequester().getId().equals(currentUser.getId())) {
-            return "IS_REQUESTER";
-        }
-        Integer minCreditScore = purchaseRequest.getMinCreditScore();
-        if (minCreditScore != null && currentUser.getCreditScore() < minCreditScore) {
-            return "CREDIT_SCORE_TOO_LOW";
-        }
-        return null;
-    }
-
-    private PurchaseRequestResponse.UserSummary toUserSummary(User user) {
-        if (user == null) {
-            return null;
-        }
-        return PurchaseRequestResponse.UserSummary.builder()
-                .id(user.getId())
-                .displayName(user.getDisplayName())
-                .profileImageUrl(user.getProfileImageUrl())
-                .creditScore(user.getCreditScore())
+    private MeetupRangeResponse toMeetupRangeResponse(PurchaseRequestMeetupRange range) {
+        return MeetupRangeResponse.builder()
+                .id(range.getId())
+                .sourceProfileId(range.getSourceProfile() == null ? null : range.getSourceProfile().getId())
+                .locationType(range.getLocationType())
+                .city(range.getCity())
+                .district(range.getDistrict())
+                .locationName(range.getLocationName())
+                .rangeStart(range.getRangeStart())
+                .rangeEnd(range.getRangeEnd())
+                .displayText(range.getDisplayText())
+                .detail(range.getDetail())
+                .latitude(range.getLatitude())
+                .longitude(range.getLongitude())
                 .build();
     }
 
-    private PurchaseQuoteResponse toQuoteResponse(PurchaseRequestQuote quote) {
-        return PurchaseQuoteResponse.builder()
-                .id(quote.getId())
-                .purchaseRequestId(quote.getPurchaseRequest().getId())
-                .quoteAmount(quote.getQuoteAmount())
-                .note(quote.getNote())
-                .status(quote.getStatus())
-                .runner(toUserSummary(quote.getRunner()))
-                .createdAt(quote.getCreatedAt())
-                .updatedAt(quote.getUpdatedAt())
-                .build();
+    private List<String> copyList(List<String> values) {
+        return values == null ? new ArrayList<>() : new ArrayList<>(values);
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeRequired(String value, String message) {
+        String normalized = normalizeOptional(value);
+        if (normalized == null) {
+            throw new RuntimeException(message);
+        }
+        return normalized;
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private void validateOptionalEnum(String value, Set<String> allowedValues, String label) {
+        if (value != null && !allowedValues.contains(value)) {
+            throw new RuntimeException("不支援的" + label + ": " + value);
+        }
     }
 }

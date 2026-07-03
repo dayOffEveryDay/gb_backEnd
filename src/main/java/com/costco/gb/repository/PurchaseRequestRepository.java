@@ -4,37 +4,49 @@ import com.costco.gb.entity.PurchaseRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
+
+import jakarta.persistence.LockModeType;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
+import java.util.List;
 
-@Repository
 public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT pr FROM PurchaseRequest pr WHERE pr.id = :id")
+    Optional<PurchaseRequest> findByIdForUpdate(@Param("id") Long id);
+
     @Query("SELECT pr FROM PurchaseRequest pr WHERE " +
-            "(:keyword IS NULL OR LOWER(pr.productName) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +
-            "(:rewardType IS NULL OR pr.rewardType = :rewardType) AND " +
+            "((:status IS NULL AND pr.status IN ('OPEN', 'QUOTING')) OR pr.status = :status) AND " +
+            "(:status IS NOT NULL OR pr.requestExpireTime > :now) AND " +
+            "(:city IS NULL OR pr.requesterCity = :city) AND " +
+            "(:district IS NULL OR pr.requesterDistrict = :district) AND " +
             "(:deliveryMethod IS NULL OR pr.deliveryMethod = :deliveryMethod) AND " +
-            "(:requestArea IS NULL OR pr.requestArea LIKE %:requestArea%) AND " +
-            "(:status IS NULL OR pr.status = :status) AND " +
-            "(:onlyAvailable = false OR (pr.status = 'OPEN' AND (pr.deadlineAt IS NULL OR pr.deadlineAt > :now)))")
+            "(:rewardType IS NULL OR pr.rewardType = :rewardType) AND " +
+            "(:keyword IS NULL OR LOWER(pr.itemName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(COALESCE(pr.itemDescription, '')) LIKE LOWER(CONCAT('%', :keyword, '%')))" )
     Page<PurchaseRequest> findWithFilters(
-            @Param("keyword") String keyword,
-            @Param("rewardType") String rewardType,
-            @Param("deliveryMethod") String deliveryMethod,
-            @Param("requestArea") String requestArea,
             @Param("status") String status,
-            @Param("onlyAvailable") boolean onlyAvailable,
+            @Param("city") String city,
+            @Param("district") String district,
+            @Param("deliveryMethod") String deliveryMethod,
+            @Param("rewardType") String rewardType,
+            @Param("keyword") String keyword,
             @Param("now") LocalDateTime now,
-            Pageable pageable);
+            Pageable pageable
+    );
 
-    Page<PurchaseRequest> findByRequesterIdOrderByCreatedAtDesc(Long requesterId, Pageable pageable);
+    @Query("SELECT pr FROM PurchaseRequest pr WHERE pr.requester.id = :userId " +
+            "AND (:status IS NULL OR pr.status = :status)")
+    Page<PurchaseRequest> findCreatedByUser(
+            @Param("userId") Long userId,
+            @Param("status") String status,
+            Pageable pageable
+    );
 
-    Page<PurchaseRequest> findByAssignedRunnerIdOrderByCreatedAtDesc(Long assignedRunnerId, Pageable pageable);
-
-    @Query("SELECT DISTINCT pr FROM PurchaseRequest pr JOIN PurchaseRequestQuote q ON q.purchaseRequest.id = pr.id " +
-            "WHERE q.runner.id = :runnerId ORDER BY pr.createdAt DESC")
-    Page<PurchaseRequest> findQuotedByRunnerId(@Param("runnerId") Long runnerId, Pageable pageable);
+    List<PurchaseRequest> findByStatusInAndRequestExpireTimeBefore(List<String> statuses, LocalDateTime now);
 }

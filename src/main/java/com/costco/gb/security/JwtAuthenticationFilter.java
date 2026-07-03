@@ -18,7 +18,7 @@ import java.util.Collections;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private final JwtService jwtService; // 你自己寫的 JWT 工具類 (負責 parseToken)
+    private final JwtService jwtService;
 
     public JwtAuthenticationFilter(JwtService jwtService) {
         this.jwtService = jwtService;
@@ -46,7 +46,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         jwt = authHeader.substring(7);
 
         try {
-            // 4. 解析 Token 取得 user_id (這裡依賴你的 JwtService 實作)
+            // 4. 透過 JwtService 解析 Token 取得 user_id
             userId = jwtService.extractUserId(jwt);
 
             // 5. 如果有解析出 userId，且目前 SecurityContext 中沒有身分紀錄
@@ -55,8 +55,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // 確認 Token 是否合法 (有沒有過期等)
                 if (jwtService.isTokenValid(jwt)) {
 
-                    // 建立身分認證物件 (因為我們不依賴密碼，所以 credentials 放 null)
-                    // 如果未來你有權限分級 (例如 ADMIN/USER)，可以把 authorities 塞在第三個參數
+                    // JWT 驗證不使用密碼，因此 credentials 設為 null
+                    // 目前尚未設定角色權限，因此 authorities 使用空集合
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                             userId,
                             null,

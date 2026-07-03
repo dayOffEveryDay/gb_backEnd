@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.util.List;
-import net.coobird.thumbnailator.Thumbnails; // 記得 import
+import net.coobird.thumbnailator.Thumbnails;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,13 +44,12 @@ public class CampaignScheduler {
             log.info("清道夫任務執行完畢：已將 {} 筆過期的合購單狀態更新為 FAILED", updatedCount);
         }
     }
-    // 新增：每小時的第 30 分鐘去巡邏一次有沒有幽靈單
+    // 每小時第 30 分鐘處理超過期限但尚未結案的合購單
     @Scheduled(cron = "0 30 * * * *")
     public void huntGhostedCampaigns() {
         log.info("👻 啟動幽靈獵人排程：開始掃描團主放鳥的合購單...");
         campaignService.processGhostedCampaigns();
     }
-
 
     @Transactional
     @Scheduled(cron = "0 0 3 * * *") // 每天凌晨 3 點執行
@@ -83,7 +82,7 @@ public class CampaignScheduler {
 
                             File thumbFile = new File("uploads/campaigns/" + thumbName);
 
-                            // 🌟 核心魔法：執行壓縮
+                            // 將舊圖片等比例縮放至最大 1080 x 1080
                             Thumbnails.of(originalFile)
                                     .size(100, 100)        // 限制最大長寬為 100x100 (會自動保持比例，不變形)
                                     .outputQuality(0.8)    // 畫質設定為 80%，極度省空間
