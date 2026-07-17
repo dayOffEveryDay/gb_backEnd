@@ -2,6 +2,7 @@ package com.costco.gb.service;
 
 import lombok.extern.slf4j.Slf4j;
 import net.coobird.thumbnailator.Thumbnails;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,53 +20,61 @@ import java.util.UUID;
 @Service
 public class FileService {
 
-    private final String BASE_UPLOAD_DIR = "uploads/campaigns/";
+    private static final String BASE_UPLOAD_DIR = "uploads/campaigns/";
 
-    // 一次處理多張上傳圖片並回傳可公開存取的網址
+    private final String baseUrl;
+
+    public FileService(@Value("${app.base-url:http://localhost:8080}") String baseUrl) {
+        this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+    }
+
+    // 上傳聊天室圖片，回傳可由前端直接載入的完整後端網址。
     public List<String> uploadChatImages(List<MultipartFile> files, Long campaignId) {
-
         List<String> uploadedUrls = new ArrayList<>();
 
         try {
-            String specificDir = (campaignId != null) ? BASE_UPLOAD_DIR + campaignId + "/" : "uploads/general/";
+            String specificDir = campaignId != null ? BASE_UPLOAD_DIR + campaignId + "/" : "uploads/general/";
             Path uploadPath = Paths.get(specificDir);
 
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
 
-            // 每張圖片使用獨立 UUID 檔名，避免檔名衝突
+            // 使用 UUID 產生檔名，避免原始檔名衝突或暴露使用者本機資訊。
             for (MultipartFile file : files) {
-                if (file.isEmpty()) continue;
+                if (file.isEmpty()) {
+                    continue;
+                }
 
-                String originalFilename = StringUtils.cleanPath(file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.jpg");
-                String fileExtension = originalFilename.contains(".") ? originalFilename.substring(originalFilename.lastIndexOf(".")) : ".jpg";
-                String newFilename = UUID.randomUUID().toString() + fileExtension;
+                String originalFilename = StringUtils.cleanPath(
+                        file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown.jpg"
+                );
+                String fileExtension = originalFilename.contains(".")
+                        ? originalFilename.substring(originalFilename.lastIndexOf("."))
+                        : ".jpg";
+                String newFilename = UUID.randomUUID() + fileExtension;
                 Path filePath = uploadPath.resolve(newFilename);
 
-                // 圖片存檔前等比例縮放至最大 1080 x 1080
+                // 圖片先壓縮尺寸與品質，降低聊天室載入成本；非圖片則原樣保存。
                 String contentType = file.getContentType();
                 if (contentType != null && contentType.startsWith("image/")) {
-                    // 使用 Thumbnailator 壓縮圖片
                     Thumbnails.of(file.getInputStream())
-                            .size(1280, 1280)    // 限制最大長寬 (非常適合手機螢幕)
-                            .outputQuality(0.75) // 畫質保留 75% (肉眼看不出差異，但檔案大小剩 1/5)
+                            .size(1280, 1280)
+                            .outputQuality(0.75)
                             .toFile(filePath.toFile());
                 } else {
-                    // 如果前端傳了非圖片檔案(例如 PDF)，就直接原檔存入不壓縮
                     Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
                 }
 
-                String imageUrl = "/" + specificDir + newFilename;
+                String imageUrl = baseUrl + "/" + specificDir + newFilename;
                 uploadedUrls.add(imageUrl);
                 log.info("聊天室檔案已上傳: {}", imageUrl);
             }
 
-            return uploadedUrls; // 回傳包含多個網址的 List
-
+            return uploadedUrls;
         } catch (IOException e) {
-            log.error("批量圖片儲存失敗，目標 ID: {}", campaignId, e);
-            throw new RuntimeException("圖片上傳失敗，請稍後再試");
+            log.error("聊天室檔案上傳失敗，campaignId: {}", campaignId, e);
+            throw new RuntimeException("檔案上傳失敗，請稍後再試");
         }
     }
 }

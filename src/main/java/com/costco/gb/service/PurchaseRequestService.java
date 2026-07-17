@@ -19,6 +19,7 @@ import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserDeliveryProfileRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -58,6 +59,9 @@ public class PurchaseRequestService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
 
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
+
     @Transactional
     public Long create(Long userId, CreatePurchaseRequestRequest request) {
         String rewardType = normalizeRequired(request.getRewardType(), "酬金模式不可空白");
@@ -72,7 +76,7 @@ public class PurchaseRequestService {
                 .requester(requester)
                 .itemName(request.getItemName().trim())
                 .itemDescription(request.getItemDescription())
-                .imageUrls(copyList(request.getImageUrls()))
+                .imageUrls(toStorageImageUrls(request.getImageUrls()))
                 .rewardType(rewardType)
                 .fixedRewardAmount("FIXED".equals(rewardType) ? request.getFixedRewardAmount() : null)
                 .requesterCity(request.getRequesterCity().trim())
@@ -323,7 +327,7 @@ public class PurchaseRequestService {
             purchaseRequest.setItemDescription(request.getItemDescription());
         }
         if (request.getImageUrls() != null) {
-            purchaseRequest.setImageUrls(copyList(request.getImageUrls()));
+            purchaseRequest.setImageUrls(toStorageImageUrls(request.getImageUrls()));
         }
         if (request.getRewardType() != null) {
             purchaseRequest.setRewardType(normalizeRequired(request.getRewardType(), "酬金模式不可空白"));
@@ -543,7 +547,7 @@ public class PurchaseRequestService {
                 .requesterId(requester.getId())
                 .requesterDisplayName(requester.getDisplayName())
                 .itemName(purchaseRequest.getItemName())
-                .imageUrls(copyList(purchaseRequest.getImageUrls()))
+                .imageUrls(toPublicImageUrls(purchaseRequest.getImageUrls()))
                 .rewardType(purchaseRequest.getRewardType())
                 .fixedRewardAmount(purchaseRequest.getFixedRewardAmount())
                 .requesterCity(purchaseRequest.getRequesterCity())
@@ -572,7 +576,7 @@ public class PurchaseRequestService {
                 .requesterCreditScore(requester.getCreditScore())
                 .itemName(purchaseRequest.getItemName())
                 .itemDescription(purchaseRequest.getItemDescription())
-                .imageUrls(copyList(purchaseRequest.getImageUrls()))
+                .imageUrls(toPublicImageUrls(purchaseRequest.getImageUrls()))
                 .rewardType(purchaseRequest.getRewardType())
                 .fixedRewardAmount(purchaseRequest.getFixedRewardAmount())
                 .requesterCity(purchaseRequest.getRequesterCity())
@@ -612,6 +616,75 @@ public class PurchaseRequestService {
 
     private List<String> copyList(List<String> values) {
         return values == null ? new ArrayList<>() : new ArrayList<>(values);
+    }
+
+    private List<String> toPublicImageUrls(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return values.stream()
+                .map(value -> toPublicImageUrl(value, normalizedBaseUrl))
+                .toList();
+    }
+
+    private String toPublicImageUrl(String value, String normalizedBaseUrl) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        if (trimmed.startsWith("general/") || trimmed.startsWith("purchase-requests/")
+                || trimmed.startsWith("campaigns/")) {
+            return normalizedBaseUrl + "/uploads/" + trimmed;
+        }
+        if (trimmed.startsWith("/uploads/") || trimmed.startsWith("/images/")) {
+            return normalizedBaseUrl + trimmed;
+        }
+        if (trimmed.startsWith("uploads/") || trimmed.startsWith("images/")) {
+            return normalizedBaseUrl + "/" + trimmed;
+        }
+        return trimmed;
+    }
+
+    private List<String> toStorageImageUrls(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return values.stream()
+                .map(value -> toStorageImageUrl(value, normalizedBaseUrl))
+                .toList();
+    }
+
+    private String toStorageImageUrl(String value, String normalizedBaseUrl) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (!normalizedBaseUrl.isBlank()) {
+            if (trimmed.startsWith(normalizedBaseUrl + "/uploads/")) {
+                return trimmed.substring((normalizedBaseUrl + "/uploads/").length());
+            }
+            if (trimmed.startsWith(normalizedBaseUrl + "/images/")) {
+                return "campaigns/" + trimmed.substring((normalizedBaseUrl + "/images/").length());
+            }
+        }
+        if (trimmed.startsWith("/uploads/")) {
+            return trimmed.substring("/uploads/".length());
+        }
+        if (trimmed.startsWith("uploads/")) {
+            return trimmed.substring("uploads/".length());
+        }
+        if (trimmed.startsWith("/images/")) {
+            return "campaigns/" + trimmed.substring("/images/".length());
+        }
+        if (trimmed.startsWith("images/")) {
+            return "campaigns/" + trimmed.substring("images/".length());
+        }
+        return trimmed;
     }
 
     private String normalizeOptional(String value) {

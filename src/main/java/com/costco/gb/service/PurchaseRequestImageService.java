@@ -5,6 +5,7 @@ import com.costco.gb.repository.PurchaseQuoteRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import lombok.RequiredArgsConstructor;
 import net.coobird.thumbnailator.Thumbnails;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,12 +24,21 @@ public class PurchaseRequestImageService {
     private final PurchaseRequestRepository requestRepository;
     private final PurchaseQuoteRepository quoteRepository;
 
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
+
     @Transactional
     public List<String> upload(Long userId, Long requestId, List<MultipartFile> files) {
         PurchaseRequest request = editable(userId, requestId);
-        if (files == null || files.isEmpty()) throw new RuntimeException("請選擇圖片");
-        List<String> urls = new ArrayList<>(request.getImageUrls() == null ? List.of() : request.getImageUrls());
-        if (urls.size() + files.size() > 5) throw new RuntimeException("託購圖片最多 5 張");
+        if (files == null || files.isEmpty()) {
+            throw new RuntimeException("請至少上傳一張圖片");
+        }
+
+        List<String> imageKeys = toStorageImageUrls(request.getImageUrls());
+        if (imageKeys.size() + files.size() > 5) {
+            throw new RuntimeException("託購圖片最多 5 張");
+        }
+
         Path dir = Paths.get("uploads", "purchase-requests", requestId.toString()).toAbsolutePath().normalize();
         try {
             Files.createDirectories(dir);
@@ -37,62 +47,147 @@ public class PurchaseRequestImageService {
                         || !file.getContentType().startsWith("image/")) {
                     throw new RuntimeException("只允許上傳圖片檔案");
                 }
+
+                // 與團購一致：檔案以 UUID 命名，DB 只保存 uploads 目錄下的相對 key。
                 String original = file.getOriginalFilename() == null ? "image.jpg" : file.getOriginalFilename();
                 String extension = original.contains(".") ? original.substring(original.lastIndexOf('.')) : ".jpg";
                 String filename = UUID.randomUUID() + extension;
-                Thumbnails.of(file.getInputStream()).size(1280, 1280).outputQuality(0.8).toFile(dir.resolve(filename).toFile());
-                urls.add("/uploads/purchase-requests/" + requestId + "/" + filename);
+                Thumbnails.of(file.getInputStream())
+                        .size(1280, 1280)
+                        .outputQuality(0.8)
+                        .toFile(dir.resolve(filename).toFile());
+                imageKeys.add("purchase-requests/" + requestId + "/" + filename);
             }
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("託購圖片上傳失敗");
         }
-        request.setImageUrls(urls);
+
+        request.setImageUrls(imageKeys);
         requestRepository.save(request);
-        return urls;
+        return toPublicImageUrls(imageKeys);
     }
 
     @Transactional
     public List<String> delete(Long userId, Long requestId, String filename) {
         PurchaseRequest request = editable(userId, requestId);
         String safeName = Paths.get(filename).getFileName().toString();
-        String url = "/uploads/purchase-requests/" + requestId + "/" + safeName;
-        List<String> urls = new ArrayList<>(request.getImageUrls() == null ? List.of() : request.getImageUrls());
-        if (!urls.remove(url)) throw new RuntimeException("找不到指定圖片");
+        String imageKey = "purchase-requests/" + requestId + "/" + safeName;
+        List<String> imageKeys = toStorageImageUrls(request.getImageUrls());
+        if (!imageKeys.remove(imageKey)) {
+            throw new RuntimeException("找不到指定圖片");
+        }
+
         try {
+            // 刪檔前確認目標仍在該託購圖片目錄內，避免路徑穿越。
             Path base = Paths.get("uploads", "purchase-requests", requestId.toString()).toAbsolutePath().normalize();
             Path target = base.resolve(safeName).normalize();
-            if (!target.startsWith(base)) throw new RuntimeException("圖片路徑不合法");
+            if (!target.startsWith(base)) {
+                throw new RuntimeException("圖片路徑不合法");
+            }
             Files.deleteIfExists(target);
         } catch (Exception e) {
             throw new RuntimeException("刪除圖片失敗");
         }
-        request.setImageUrls(urls);
+
+        request.setImageUrls(imageKeys);
         requestRepository.save(request);
-        return urls;
+        return toPublicImageUrls(imageKeys);
     }
 
     @Transactional
     public List<String> reorder(Long userId, Long requestId, List<String> imageUrls) {
         PurchaseRequest request = editable(userId, requestId);
-        List<String> current = request.getImageUrls() == null ? List.of() : request.getImageUrls();
-        if (imageUrls == null || imageUrls.size() != current.size()
-                || !new HashSet<>(imageUrls).equals(new HashSet<>(current))) {
-            throw new RuntimeException("圖片排序清單與現有圖片不一致");
+        List<String> current = toStorageImageUrls(request.getImageUrls());
+        List<String> requested = toStorageImageUrls(imageUrls);
+        if (requested.size() != current.size() || !new HashSet<>(requested).equals(new HashSet<>(current))) {
+            throw new RuntimeException("圖片排序內容必須與目前圖片一致");
         }
-        request.setImageUrls(new ArrayList<>(imageUrls));
+
+        request.setImageUrls(new ArrayList<>(requested));
         requestRepository.save(request);
-        return request.getImageUrls();
+        return toPublicImageUrls(request.getImageUrls());
+    }
+
+    private List<String> toPublicImageUrls(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return values.stream()
+                .map(value -> toPublicImageUrl(value, normalizedBaseUrl))
+                .toList();
+    }
+
+    private String toPublicImageUrl(String value, String normalizedBaseUrl) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        if (trimmed.startsWith("general/") || trimmed.startsWith("purchase-requests/")
+                || trimmed.startsWith("campaigns/")) {
+            return normalizedBaseUrl + "/uploads/" + trimmed;
+        }
+        if (trimmed.startsWith("/uploads/") || trimmed.startsWith("/images/")) {
+            return normalizedBaseUrl + trimmed;
+        }
+        if (trimmed.startsWith("uploads/") || trimmed.startsWith("images/")) {
+            return normalizedBaseUrl + "/" + trimmed;
+        }
+        return trimmed;
+    }
+
+    private List<String> toStorageImageUrls(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return values.stream()
+                .map(value -> toStorageImageUrl(value, normalizedBaseUrl))
+                .toList();
+    }
+
+    private String toStorageImageUrl(String value, String normalizedBaseUrl) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (!normalizedBaseUrl.isBlank()) {
+            if (trimmed.startsWith(normalizedBaseUrl + "/uploads/")) {
+                return trimmed.substring((normalizedBaseUrl + "/uploads/").length());
+            }
+            if (trimmed.startsWith(normalizedBaseUrl + "/images/")) {
+                return "campaigns/" + trimmed.substring((normalizedBaseUrl + "/images/").length());
+            }
+        }
+        if (trimmed.startsWith("/uploads/")) {
+            return trimmed.substring("/uploads/".length());
+        }
+        if (trimmed.startsWith("uploads/")) {
+            return trimmed.substring("uploads/".length());
+        }
+        if (trimmed.startsWith("/images/")) {
+            return "campaigns/" + trimmed.substring("/images/".length());
+        }
+        if (trimmed.startsWith("images/")) {
+            return "campaigns/" + trimmed.substring("images/".length());
+        }
+        return trimmed;
     }
 
     private PurchaseRequest editable(Long userId, Long requestId) {
         PurchaseRequest request = requestRepository.findByIdForUpdate(requestId)
-                .orElseThrow(() -> new RuntimeException("找不到委託單"));
-        if (!request.getRequester().getId().equals(userId)) throw new RuntimeException("只有委託人可以管理圖片");
+                .orElseThrow(() -> new RuntimeException("找不到託購需求"));
+        if (!request.getRequester().getId().equals(userId)) {
+            throw new RuntimeException("只有託購發起人可以管理圖片");
+        }
         if (!"OPEN".equals(request.getStatus())
                 || quoteRepository.existsByPurchaseRequestIdAndStatus(requestId, "ACTIVE")) {
-            throw new RuntimeException("已有報價或委託已成立後不可修改圖片");
+            throw new RuntimeException("已有報價或狀態不可編輯，無法管理圖片");
         }
         return request;
     }

@@ -24,6 +24,7 @@ import com.costco.gb.repository.PurchaseRequestMeetupRangeRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -65,6 +66,9 @@ public class PurchaseOrderService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final PurchaseChatRoomRepository chatRoomRepository;
+
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
 
     @Transactional(readOnly = true)
     public Page<PurchaseOrderSummaryResponse> listMyOrders(
@@ -715,7 +719,7 @@ public class PurchaseOrderService {
                 .chatRoomId(chatRoomRepository.findByPurchaseOrderId(order.getId())
                         .map(PurchaseChatRoom::getId).orElse(null))
                 .itemName(request.getItemName())
-                .imageUrls(copyList(request.getImageUrls()))
+                .imageUrls(toPublicImageUrls(request.getImageUrls()))
                 .role(role)
                 .requesterId(order.getRequester().getId())
                 .requesterDisplayName(order.getRequester().getDisplayName())
@@ -743,7 +747,7 @@ public class PurchaseOrderService {
                         .map(PurchaseChatRoom::getId).orElse(null))
                 .itemName(request.getItemName())
                 .itemDescription(request.getItemDescription())
-                .imageUrls(copyList(request.getImageUrls()))
+                .imageUrls(toPublicImageUrls(request.getImageUrls()))
                 .requesterId(order.getRequester().getId())
                 .requesterDisplayName(order.getRequester().getDisplayName())
                 .runnerId(order.getRunner().getId())
@@ -874,6 +878,37 @@ public class PurchaseOrderService {
 
     private List<String> copyList(List<String> values) {
         return values == null ? new ArrayList<>() : new ArrayList<>(values);
+    }
+
+    private List<String> toPublicImageUrls(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return values.stream()
+                .map(value -> toPublicImageUrl(value, normalizedBaseUrl))
+                .toList();
+    }
+
+    private String toPublicImageUrl(String value, String normalizedBaseUrl) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        if (trimmed.startsWith("general/") || trimmed.startsWith("purchase-requests/")
+                || trimmed.startsWith("campaigns/")) {
+            return normalizedBaseUrl + "/uploads/" + trimmed;
+        }
+        if (trimmed.startsWith("/uploads/") || trimmed.startsWith("/images/")) {
+            return normalizedBaseUrl + trimmed;
+        }
+        if (trimmed.startsWith("uploads/") || trimmed.startsWith("images/")) {
+            return normalizedBaseUrl + "/" + trimmed;
+        }
+        return trimmed;
     }
 
     private String normalizeOptional(String value) {

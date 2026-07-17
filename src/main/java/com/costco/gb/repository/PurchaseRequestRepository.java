@@ -28,7 +28,7 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
             "(:deliveryMethod IS NULL OR pr.deliveryMethod = :deliveryMethod) AND " +
             "(:rewardType IS NULL OR pr.rewardType = :rewardType) AND " +
             "(:keyword IS NULL OR LOWER(pr.itemName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-            "OR LOWER(COALESCE(pr.itemDescription, '')) LIKE LOWER(CONCAT('%', :keyword, '%')))" )
+            "OR pr.itemDescription LIKE CONCAT('%', :keyword, '%'))" )
     Page<PurchaseRequest> findWithFilters(
             @Param("status") String status,
             @Param("city") String city,

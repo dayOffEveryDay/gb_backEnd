@@ -199,6 +199,8 @@ public class PurchaseQuoteService {
         validateCandidate(purchaseRequest, runner);
 
         PurchaseOrder order = createOrder(purchaseRequest, runner, null);
+        order.setRunnerConfirmedAt(LocalDateTime.now());
+        orderRepository.save(order);
         purchaseChatService.createForOrder(order);
         purchaseRequest.setStatus("ORDERED");
         purchaseRequestRepository.save(purchaseRequest);

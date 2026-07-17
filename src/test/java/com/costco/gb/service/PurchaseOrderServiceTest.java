@@ -101,6 +101,20 @@ class PurchaseOrderServiceTest {
     }
 
     @Test
+    @DisplayName("固定酬金承接者接單視為已確認，發起人確認後進入 CONFIRMED")
+    void fixedAcceptRequesterConfirmChangesStatus() {
+        PurchaseOrder order = order("WAITING_CONFIRMATION");
+        order.setRunnerConfirmedAt(LocalDateTime.now());
+        when(orderRepository.findByIdForUpdate(30L)).thenReturn(Optional.of(order));
+
+        PurchaseOrderDetailResponse response = purchaseOrderService.confirmRequester(1L, 30L);
+
+        assertEquals("CONFIRMED", response.getStatus());
+        assertNotNull(order.getRequesterConfirmedAt());
+        verify(orderEventRepository, times(2)).save(any());
+    }
+
+    @Test
     @DisplayName("接單人在已確認階段取消應扣 10 分並重新開放委託")
     void runnerCancelConfirmedOrderPenalizesAndReopens() {
         PurchaseOrder order = order("CONFIRMED");

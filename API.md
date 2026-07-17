@@ -94,8 +94,8 @@ STOMP `CONNECT` 也使用相同 header。
 
 ### Purchase order status
 
-- `WAITING_CONFIRMATION`: 訂單已成立，等待雙方確認
-- `CONFIRMED`: 雙方已確認
+- `WAITING_CONFIRMATION`: 訂單已成立，等待必要方確認
+- `CONFIRMED`: 必要方已確認
 - `IN_PROGRESS`: 接單人處理中
 - `SHIPPED`: 宅配或店到店已寄出
 - `DELIVERED_PENDING_CONFIRM`: 面交已交付，等待委託人確認
@@ -416,10 +416,12 @@ Response:
 {
   "success": true,
   "urls": [
-    "/uploads/campaigns/123/example.jpg"
+    "http://localhost:8080/uploads/campaigns/123/example.jpg"
   ]
 }
 ```
+
+`urls` 會依 `app.base-url` 回傳完整後端網址。託購建立或更新收到這類 URL 時，後端會像團購圖片一樣只把 uploads 目錄下的相對 key 寫入 DB，例如 `general/example.jpg`。
 
 ### WebSocket/STOMP
 
@@ -567,7 +569,9 @@ Auth: required
 {
   "itemName": "莓姬梅酒",
   "itemDescription": "希望購買草莓口味",
-  "imageUrls": ["item1.jpg", "item2.jpg"],
+  "imageUrls": [
+    "http://localhost:8080/uploads/general/3c835b6a-552a-473c-aee3-51180c94976d.png"
+  ],
   "rewardType": "FIXED",
   "fixedRewardAmount": 100,
   "requesterCity": "台北市",
@@ -661,7 +665,7 @@ Response: `200 OK`，`Page<PurchaseRequestSummaryResponse>`
       "requesterId": 1,
       "requesterDisplayName": "A Hui",
       "itemName": "莓姬梅酒",
-      "imageUrls": ["item1.jpg"],
+      "imageUrls": ["http://localhost:8080/uploads/general/3c835b6a-552a-473c-aee3-51180c94976d.png"],
       "rewardType": "FIXED",
       "fixedRewardAmount": 100,
       "requesterCity": "台北市",
@@ -701,7 +705,7 @@ Response: `200 OK`
   "requesterCreditScore": 100,
   "itemName": "莓姬梅酒",
   "itemDescription": "希望購買草莓口味",
-  "imageUrls": ["item1.jpg"],
+  "imageUrls": ["http://localhost:8080/uploads/general/3c835b6a-552a-473c-aee3-51180c94976d.png"],
   "rewardType": "FIXED",
   "fixedRewardAmount": 100,
   "requesterCity": "台北市",
@@ -922,7 +926,7 @@ Auth: required
 - 接單人不可是委託人，信用分須達門檻，雙方不可存在封鎖關係。
 - 使用交易鎖避免多人同時承接。
 
-成功後建立 `WAITING_CONFIRMATION` 訂單、將委託改為 `ORDERED`，並寫入 `ORDER_CREATED_BY_ACCEPT` 事件。
+成功後建立 `WAITING_CONFIRMATION` 訂單、將委託改為 `ORDERED`，並寫入 `ORDER_CREATED_BY_ACCEPT` 事件。固定酬金由接單人主動承接，接單當下即視為接單人已確認，後續只需委託人確認即可進入 `CONFIRMED`。
 
 Response: `201 Created`
 
@@ -986,7 +990,7 @@ Response: `200 OK`，`PurchaseOrderDetailResponse`，主要欄位:
 - 委託商品、圖片與交易雙方
 - 固定酬金或得標報價金額
 - `deliveryPrivateDetail` 與面交範圍快照
-- 雙方確認、開始、寄出、交貨、完成與取消時間
+- 必要方確認、開始、寄出、交貨、完成與取消時間
 - 物流公司、單號與查詢網址
 - 歸責使用者與信用扣分
 - `deliveryDeadlineAt`
@@ -1001,7 +1005,8 @@ Auth: required，只有委託人可操作。
 
 - 訂單必須是 `WAITING_CONFIRMATION`。
 - 重複確認採冪等處理，直接回傳目前訂單。
-- 接單人也已確認時，訂單改為 `CONFIRMED`。
+- `FIXED` 固定酬金接單時，接單人已在承接當下確認；委託人確認後訂單改為 `CONFIRMED`。
+- `QUOTE` 報價模式若接單人尚未確認，需雙方都確認後訂單才改為 `CONFIRMED`。
 
 Response: `200 OK`，`PurchaseOrderDetailResponse`。
 
@@ -1143,13 +1148,14 @@ WebSocket/STOMP:
 ```json
 {
   "imageUrls": [
-    "/uploads/purchase-requests/1001/a.jpg",
-    "/uploads/purchase-requests/1001/b.jpg"
+    "http://localhost:8080/uploads/purchase-requests/1001/a.jpg",
+    "http://localhost:8080/uploads/purchase-requests/1001/b.jpg"
   ]
 }
 ```
 
 只有委託人可管理圖片，且委託必須是沒有有效報價的 `OPEN` 狀態。圖片只允許 image content type。
+後端 DB 只保存 uploads 目錄下的相對 key，例如 `purchase-requests/1001/a.jpg`；API response 會依 `app.base-url` 回傳完整可讀 URL。
 
 ## 15. Purchase Order Review API
 
@@ -1183,7 +1189,7 @@ Response: `204 No Content`。封鎖後雙方不能成立新的報價或接單交
 ## 17. Purchase Scheduler
 
 - `expirePurchaseRequests`: 每分鐘將過期 `OPEN` / `QUOTING` 委託與有效報價轉為 `EXPIRED`。
-- `checkPurchaseOrderConfirmationTimeout`: 每分鐘處理成立超過 24 小時仍未完成雙方確認的訂單，依未確認責任方扣分並重開委託。
+- `checkPurchaseOrderConfirmationTimeout`: 每分鐘處理成立超過 24 小時仍未完成必要方確認的訂單，依未確認責任方扣分並重開委託。
 - `checkPurchaseOrderAbnormalTimeout`: 每分鐘處理異常 12 小時未回應並扣 10 分。
 - `autoCompletePurchaseOrders`: 每 10 分鐘檢查交貨期限加 24 小時後仍無異常的訂單並自動完成。
 
@@ -1191,7 +1197,7 @@ Response: `204 No Content`。封鎖後雙方不能成立新的報價或接單交
 
 `POST /api/v1/purchase-orders/{orderId}/confirm/runner`
 
-Auth: required，只有接單人可操作。規則與委託人確認相同。
+Auth: required，只有接單人可操作。`FIXED` 固定酬金接單已在承接時自動標記接單人確認；此 API 主要提供 `QUOTE` 報價模式或相容既有訂單使用。
 
 Response: `200 OK`，`PurchaseOrderDetailResponse`。
 

@@ -11,8 +11,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 託購委託單。
- * 保存公開商品需求、酬金方式、交付摘要與委託期限。
+ * 託購需求主檔。
+ * 記錄發起人、商品、酬金、配送限制與託購狀態，供報價與訂單流程銜接。
  */
 @Entity
 @Table(
@@ -36,7 +36,7 @@ public class PurchaseRequest extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 發布託購需求的委託人。
+    // 發起託購需求的會員；Repository 會透過 requester.id 查詢我的發起列表。
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "requester_id", nullable = false)
     private User requester;
@@ -48,17 +48,17 @@ public class PurchaseRequest extends BaseEntity {
     @Column(name = "item_description", columnDefinition = "text")
     private String itemDescription;
 
-    // 商品圖片網址清單，以 JSON 陣列保存。
+    // 託購商品圖片網址清單，依陣列順序作為前台顯示排序。
     @Builder.Default
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "image_urls", columnDefinition = "json")
     private List<String> imageUrls = new ArrayList<>();
 
-    // 酬金模式：FIXED 或 QUOTE。
+    // 酬金模式：FIXED 表示固定酬金，QUOTE 表示開放承接者報價。
     @Column(name = "reward_type", nullable = false, length = 30)
     private String rewardType;
 
-    // 固定酬金模式使用；報價模式可為 null。
+    // 固定酬金金額；報價模式可為 null。
     @Column(name = "fixed_reward_amount")
     private Integer fixedRewardAmount;
 
@@ -72,20 +72,20 @@ public class PurchaseRequest extends BaseEntity {
     @Column(name = "delivery_method", nullable = false, length = 30)
     private String deliveryMethod;
 
-    // 成立前可公開顯示的交付地點摘要。
+    // 公開交付摘要，列表與詳情頁可直接顯示，不包含敏感地址。
     @Column(name = "delivery_public_summary", nullable = false, length = 255)
     private String deliveryPublicSummary;
 
-    // 成立後才可提供給交易雙方的地址、電話或店到店資料。
+    // 私密交付資訊，只有成立訂單後的相關雙方可查看。
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "delivery_private_detail", columnDefinition = "json")
     private Map<String, Object> deliveryPrivateDetail;
 
-    // 未成立委託超過此時間後應轉為過期。
+    // 託購需求截止時間；排程會依此將未成立需求轉為過期。
     @Column(name = "request_expire_time", nullable = false)
     private LocalDateTime requestExpireTime;
 
-    // 訂單成立後允許完成交貨的時數。
+    // 訂單成立後的交付期限，小時為單位。
     @Column(name = "delivery_deadline_hours", nullable = false)
     private Integer deliveryDeadlineHours;
 
