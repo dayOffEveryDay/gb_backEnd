@@ -546,6 +546,7 @@ public class PurchaseRequestService {
                 .id(purchaseRequest.getId())
                 .requesterId(requester.getId())
                 .requesterDisplayName(requester.getDisplayName())
+                .requesterProfileImageUrl(requester.getProfileImageUrl())
                 .itemName(purchaseRequest.getItemName())
                 .imageUrls(toPublicImageUrls(purchaseRequest.getImageUrls()))
                 .rewardType(purchaseRequest.getRewardType())

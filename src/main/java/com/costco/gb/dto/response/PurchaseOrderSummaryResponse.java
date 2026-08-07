@@ -17,8 +17,10 @@ public class PurchaseOrderSummaryResponse {
     private String role;
     private Long requesterId;
     private String requesterDisplayName;
+    private String requesterProfileImageUrl;
     private Long runnerId;
     private String runnerDisplayName;
+    private String runnerProfileImageUrl;
     private String deliveryMethod;
     private String rewardType;
     private Integer rewardAmount;

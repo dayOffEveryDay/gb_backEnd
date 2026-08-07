@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/stores").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/categories").permitAll()
                         .requestMatchers("/uploads/**", "/images/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/share/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/purchase-requests").permitAll()

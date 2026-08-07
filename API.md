@@ -664,6 +664,7 @@ Response: `200 OK`，`Page<PurchaseRequestSummaryResponse>`
       "id": 1001,
       "requesterId": 1,
       "requesterDisplayName": "A Hui",
+      "requesterProfileImageUrl": "https://profile.example/requester.jpg",
       "itemName": "莓姬梅酒",
       "imageUrls": ["http://localhost:8080/uploads/general/3c835b6a-552a-473c-aee3-51180c94976d.png"],
       "rewardType": "FIXED",
@@ -937,8 +938,10 @@ Response: `201 Created`
   "itemName": "莓姬梅酒",
   "requesterId": 1,
   "requesterDisplayName": "A Hui",
+  "requesterProfileImageUrl": "https://profile.example/requester.jpg",
   "runnerId": 2,
   "runnerDisplayName": "Runner",
+  "runnerProfileImageUrl": "https://profile.example/runner.jpg",
   "selectedQuoteId": null,
   "status": "WAITING_CONFIRMATION",
   "createdAt": "2026-07-03T12:00:00",
@@ -987,7 +990,7 @@ Auth: required，只有委託人與接單人可讀取。
 
 Response: `200 OK`，`PurchaseOrderDetailResponse`，主要欄位:
 
-- 委託商品、圖片與交易雙方
+- 委託商品、圖片與交易雙方，包含 `requesterProfileImageUrl`、`runnerProfileImageUrl`
 - 固定酬金或得標報價金額
 - `deliveryPrivateDetail` 與面交範圍快照
 - 必要方確認、開始、寄出、交貨、完成與取消時間

@@ -53,6 +53,10 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] [%X{traceId}] %-40.40logger{39} : %m%n"
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+  share:
+    campaign-detail-path: ${CAMPAIGN_DETAIL_PATH:/campaigns/{id}}
+    purchase-request-detail-path: ${PURCHASE_REQUEST_DETAIL_PATH:/purchase-requests/{id}}
 
 ---
 spring:

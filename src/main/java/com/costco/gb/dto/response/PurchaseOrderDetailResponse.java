@@ -18,8 +18,10 @@ public class PurchaseOrderDetailResponse {
     private List<String> imageUrls;
     private Long requesterId;
     private String requesterDisplayName;
+    private String requesterProfileImageUrl;
     private Long runnerId;
     private String runnerDisplayName;
+    private String runnerProfileImageUrl;
     private Long selectedQuoteId;
     private String rewardType;
     private Integer rewardAmount;

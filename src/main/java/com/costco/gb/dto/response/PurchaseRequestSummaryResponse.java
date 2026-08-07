@@ -12,6 +12,7 @@ public class PurchaseRequestSummaryResponse {
     private Long id;
     private Long requesterId;
     private String requesterDisplayName;
+    private String requesterProfileImageUrl;
     private String itemName;
     private List<String> imageUrls;
     private String rewardType;

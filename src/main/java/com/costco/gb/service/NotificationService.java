@@ -90,7 +90,12 @@ public class NotificationService {
         messagingTemplate.convertAndSendToUser(
                 user.getId().toString(),
                 "/queue/notifications",
-                Map.of("content", content, "type", type, "referenceId", refId)
+                Map.of(
+                        "id", notification.getId(),
+                        "content", content,
+                        "type", type,
+                        "referenceId", refId
+                )
         );
     }
 
