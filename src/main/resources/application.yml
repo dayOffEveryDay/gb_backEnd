@@ -52,8 +52,6 @@ logging:
     # 自訂 Log 格式，加入 [%X{traceId}]
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] [%X{traceId}] %-40.40logger{39} : %m%n"
 app:
-  base-url: ${APP_BASE_URL:http://localhost:8080}
-  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
   share:
     campaign-detail-path: ${CAMPAIGN_DETAIL_PATH:/campaigns/{id}}
     purchase-request-detail-path: ${PURCHASE_REQUEST_DETAIL_PATH:/purchase-requests/{id}}
@@ -70,8 +68,17 @@ spring:
     password: ${GBC_DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
+# 本機開發可直接使用 localhost，也可透過環境變數覆寫以測試公開網址。
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+  dev-login-enabled: ${DEV_LOGIN_ENABLED:true}
+
 line:
   api:
+    # 本地開發使用獨立 LINE Channel，避免變更正式 Channel 的 callback URL。
+    client-id: ${GBC_LINE_DEV_CHANNEL_ID}
+    client-secret: ${GBC_LINE_DEV_CHANNEL_SECRET}
     # 本地開發使用 React dev server 的 LINE callback。
     redirect-uri: "http://localhost:5173/login/callback"
 
@@ -86,6 +93,12 @@ spring:
     username: ${DB_USERNAME:root}
     password: ${GBC_DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
+
+# 正式環境不提供 localhost 預設值，分享頁與前端同網域時沿用公開後端網址。
+app:
+  base-url: ${APP_BASE_URL}
+  frontend-base-url: ${FRONTEND_BASE_URL:${APP_BASE_URL}}
+  dev-login-enabled: false
 
 line:
   api:

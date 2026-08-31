@@ -166,6 +166,10 @@ Authorization: Bearer <JWT_TOKEN>
 - `GBC_LINE_CHANNEL_SECRET`
 - `APP_BASE_URL`
 
+正式環境啟用 `prod` profile 時，`APP_BASE_URL` 為必填；分享頁的 Open Graph 網址、圖片 host 與前端跳轉網址都會使用它。只有前後端分屬不同網域時，才另外設定 `FRONTEND_BASE_URL`。
+
+開發者登入 API 僅在 `local` profile 預設啟用，可用 `DEV_LOGIN_ENABLED=false` 關閉；`prod` profile 強制關閉，即使環境變數被誤設為 `true` 也不會啟用。
+
 ## 執行方式
 
 啟動專案：

@@ -25,12 +25,15 @@ STOMP `CONNECT` 也使用相同 header。
 
 - `POST /api/v1/auth/line`
 - `POST /api/v1/auth/refresh`
-- `GET /api/v1/auth/dev-login`
+- `GET /api/v1/auth/dev-login`（僅 local profile 啟用）
 - `GET /api/v1/stores`
 - `GET /api/v1/categories`
 - `GET /api/v1/campaigns`
+- `GET /api/v1/public/campaigns/{campaignId}`
 - `GET /api/v1/purchase-requests`
 - `GET /api/v1/purchase-requests/{id}`
+- `GET /share/campaigns/{campaignId}`
+- `GET /share/purchase-requests/{purchaseRequestId}`
 - `/images/**`
 - `/uploads/**`
 - `/ws/**`
@@ -162,7 +165,8 @@ Response:
 
 `GET /api/v1/auth/dev-login?userId=1`
 
-僅供開發測試使用，回傳 JWT 與 refresh token。
+僅供開發測試使用，回傳 JWT 與 refresh token。`local` profile 預設啟用，
+可透過 `DEV_LOGIN_ENABLED=false` 關閉；`prod` profile 一律關閉並回傳 `404 Not Found`。
 
 ## 2. Reference Data API
 
@@ -226,6 +230,77 @@ Response: `Page<CampaignSummaryResponse>`
 - `categoryName`
 - `host`
 - `myParticipantStatus`
+
+### 取得公開團購詳情
+
+`GET /api/v1/public/campaigns/{campaignId}`
+
+Auth: not required
+
+此端點供前端分享頁取得團購公開資料。加入團購仍須使用需要登入的
+`POST /api/v1/campaigns/{id}/join`。
+
+Response `200 OK`:
+
+```json
+{
+  "id": 8,
+  "scenarioType": "SCHEDULED",
+  "status": "OPEN",
+  "itemName": "金色三麥包種茶啤酒",
+  "categoryName": "飲料",
+  "availableQuantity": 5,
+  "totalQuantity": 12,
+  "pricePerUnit": 85,
+  "storeName": "中和店",
+  "meetupLocation": "聊天討論",
+  "meetupTime": "2026-09-06T12:27:00+08:00",
+  "expireTime": "2026-09-06T12:27:00+08:00",
+  "imageUrls": [
+    "https://example.com/images/campaign-8-1.jpg"
+  ],
+  "host": {
+    "id": 4,
+    "displayName": "開發者 4",
+    "profileImageUrl": "https://example.com/avatar.jpg",
+    "creditScore": 100
+  },
+  "canJoin": true
+}
+```
+
+`canJoin` 僅在下列條件全部成立時為 `true`：
+
+- `status` 為 `OPEN`
+- `availableQuantity` 大於 `0`
+- `expireTime` 尚未到期，或未設定截止時間
+
+HTTP status:
+
+| Status | 說明 |
+| --- | --- |
+| `200 OK` | 團購可公開顯示。已滿、已截止、失敗或已完成仍回傳資料，並以 `status` 與 `canJoin: false` 呈現。 |
+| `404 Not Found` | 團購不存在或已刪除。 |
+| `410 Gone` | 團購狀態為 `CANCELLED` 或 `CANCEL_PENDING`，已下架且不再公開。 |
+
+公開回應不包含參加者名單、聊天訊息、聯絡資料、團主私人會員資料或登入者的參團狀態。
+
+### 團購 LINE 分享頁
+
+`GET /share/campaigns/{campaignId}`
+
+Auth: not required
+
+回傳 `text/html`，供 LINE 爬蟲讀取初始 HTML 中的 Open Graph 標籤：
+
+```html
+<meta property="og:title" content="金色三麥包種茶啤酒">
+<meta property="og:description" content="中和店・NT$ 85・剩餘 5 件">
+<meta property="og:image" content="https://example.com/images/campaign-8-1.jpg">
+<meta property="og:url" content="https://gb.ttgtool.com/share/campaigns/8">
+```
+
+分享頁不存在時回 `404 Not Found`；已取消或進入取消流程時回 `410 Gone`。
 
 ### 建立團購
 

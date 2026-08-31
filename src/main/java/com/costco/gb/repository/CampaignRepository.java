@@ -3,15 +3,24 @@ package com.costco.gb.repository;
 import com.costco.gb.entity.Campaign;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
-import java.time.LocalDateTime;
-import java.util.List;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
 @Repository
 public interface CampaignRepository extends JpaRepository<Campaign, Long> {
+
+    // 公開詳情一次載入團主、分類與門市，避免 DTO 組裝時產生額外查詢。
+    @EntityGraph(attributePaths = {"host", "category", "store"})
+    @Query("SELECT c FROM Campaign c WHERE c.id = :campaignId")
+    Optional<Campaign> findPublicDetailsById(@Param("campaignId") Long campaignId);
 
     // 首頁大廳用：查詢指定門市、特定狀態 (如 OPEN)，且「還沒過期」的合購單，並支援分頁
     Page<Campaign> findByStoreIdAndStatusAndExpireTimeAfter(

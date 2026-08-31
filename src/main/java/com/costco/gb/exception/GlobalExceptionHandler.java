@@ -9,6 +9,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -17,6 +18,23 @@ import java.util.Map;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatusException(
+            ResponseStatusException ex, HttpServletRequest request) {
+
+        // 保留服務層指定的 404、410 等 HTTP 語意，讓公開頁能區分不存在與已下架。
+        HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(ex.getReason())
+                .path(request.getRequestURI())
+                .build();
+
+        return ResponseEntity.status(status).body(errorResponse);
+    }
 
     /**
      * 1. 攔截我們自己寫的商業邏輯錯誤 (RuntimeException)

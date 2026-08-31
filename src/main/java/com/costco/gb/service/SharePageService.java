@@ -6,8 +6,10 @@ import com.costco.gb.repository.CampaignRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.HtmlUtils;
 
 import java.util.List;
@@ -35,19 +37,28 @@ public class SharePageService {
     @Transactional(readOnly = true)
     public String renderCampaignPage(Long campaignId) {
         Campaign campaign = campaignRepository.findById(campaignId)
-                .orElseThrow(() -> new RuntimeException("找不到該團購"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "團購不存在或已刪除"));
+
+        // 已取消或進入取消流程的團購不再產生公開分享內容。
+        if ("CANCELLED".equals(campaign.getStatus()) || "CANCEL_PENDING".equals(campaign.getStatus())) {
+            throw new ResponseStatusException(HttpStatus.GONE, "團購已下架、不再公開");
+        }
 
         // 分享頁只揭露原本就屬於公開資訊的欄位，避免將參團者或交易資訊帶入 LINE 預覽。
         String imageUrl = firstCampaignImageUrl(campaign.getImageUrls());
         String price = campaign.getPricePerUnit() == null
                 ? "價格請見詳情"
-                : "NT$ " + formatAmount(campaign.getPricePerUnit()) + "／份";
+                : "NT$ " + formatAmount(campaign.getPricePerUnit());
         String hostName = campaign.getHost().getDisplayName();
         String location = fallback(campaign.getMeetupLocation(), "地點請見詳情");
-        String description = price + "・主揪 " + hostName + "・" + location;
+        String storeName = campaign.getStore().getName();
+        String availableQuantity = campaign.getAvailableQuantity() == null
+                ? "剩餘數量請見詳情"
+                : "剩餘 " + campaign.getAvailableQuantity() + " 件";
+        String description = storeName + "・" + price + "・" + availableQuantity;
 
         SharePageData data = new SharePageData(
-                campaign.getItemName() + "｜團購分享",
+                campaign.getItemName(),
                 description,
                 imageUrl,
                 buildBackendUrl("/share/campaigns/" + campaignId),

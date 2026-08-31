@@ -2,6 +2,7 @@ package com.costco.gb.service;
 
 import com.costco.gb.entity.Campaign;
 import com.costco.gb.entity.PurchaseRequest;
+import com.costco.gb.entity.Store;
 import com.costco.gb.entity.User;
 import com.costco.gb.repository.CampaignRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
@@ -13,12 +14,15 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -50,6 +54,8 @@ class SharePageServiceTest {
                 .itemName("堅果 <限量>")
                 .imageUrls("abc.jpg,def.jpg")
                 .pricePerUnit(399)
+                .availableQuantity(5)
+                .store(Store.builder().name("中和店").build())
                 .meetupLocation("台北車站")
                 .status("OPEN")
                 .build();
@@ -60,9 +66,23 @@ class SharePageServiceTest {
         assertTrue(html.contains("property=\"og:title\""));
         assertTrue(html.contains("https://api.example.com/images/abc.jpg"));
         assertTrue(html.contains("https://app.example.com/campaigns/10"));
+        assertTrue(html.contains("content=\"中和店・NT$ 399・剩餘 5 件\""));
         assertTrue(html.contains("堅果 &lt;限量&gt;"));
         assertTrue(html.contains("小明 &amp; 小華"));
         assertFalse(html.contains("堅果 <限量>"));
+    }
+
+    @Test
+    @DisplayName("已取消團購的分享頁回傳資源已下架")
+    void cancelledCampaignPageIsGone() {
+        Campaign campaign = Campaign.builder().id(10L).status("CANCELLED").build();
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> sharePageService.renderCampaignPage(10L));
+
+        assertEquals(410, exception.getStatusCode().value());
     }
 
     @Test

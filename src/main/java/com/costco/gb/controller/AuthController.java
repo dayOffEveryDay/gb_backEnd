@@ -8,6 +8,8 @@ import com.costco.gb.security.JwtService;
 import com.costco.gb.service.AuthService;
 import com.costco.gb.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
@@ -26,6 +29,9 @@ public class AuthController {
     private final AuthService authService;
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
+
+    @Value("${app.dev-login-enabled:false}")
+    private boolean devLoginEnabled;
 
     @PostMapping("/line")
     public ResponseEntity<AuthResponse> lineLogin(@RequestBody LineLoginRequest request) {
@@ -54,6 +60,11 @@ public class AuthController {
 
     @GetMapping("/dev-login")
     public ResponseEntity<Map<String, String>> devLogin(@RequestParam(defaultValue = "1") Long userId) {
+        // 後端必須自行封鎖開發者登入，避免前端入口遺漏時仍可直接取得任意使用者 token。
+        if (!devLoginEnabled) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "找不到資源");
+        }
+
         // 開發環境用登入入口，方便直接取得測試用 token
         String token = jwtService.generateToken(userId);
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(userId);
