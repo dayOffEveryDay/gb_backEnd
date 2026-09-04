@@ -17,7 +17,7 @@ public class ChatService {
     private final ChatMessageRepository chatMessageRepository;
     private final CampaignRepository campaignRepository;
     private final UserRepository userRepository;
-    private final ParticipantRepository participantRepository;
+    private final CampaignChatAccessService chatAccessService;
 
     @Transactional
     public ChatMessageResponse saveMessage(Long senderId, Long campaignId, ChatMessageRequest request) {
@@ -26,13 +26,8 @@ public class ChatService {
         User sender = userRepository.findById(senderId)
                 .orElseThrow(() -> new RuntimeException("找不到使用者"));
 
-        // 🛡️ 防護：確認他是否為該團成員或團主
-        boolean isHost = campaign.getHost().getId().equals(senderId);
-        boolean isParticipant = participantRepository.findByCampaignIdAndUserId(campaignId, senderId).isPresent();
-
-        if (!isHost && !isParticipant) {
-            throw new RuntimeException("您不是此合購單的成員，無法發言！");
-        }
+        // 每次送出訊息都重新確認成員與團購狀態，避免退出、被踢或封存後繼續發言。
+        chatAccessService.requireWritable(campaign, senderId);
 
         ChatMessage message = ChatMessage.builder()
                 .campaign(campaign)
@@ -56,14 +51,8 @@ public class ChatService {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到合購單"));
 
-        // 🛡️ 資安防護：查驗身分，不是團員不准看歷史紀錄！
-        boolean isHost = campaign.getHost().getId().equals(userId);
-        boolean isParticipant = participantRepository.findByCampaignIdAndUserId(campaignId, userId).isPresent();
-
-        if (!isHost && !isParticipant) {
-            log.warn("資安警報：User {} 企圖偷看合購單 {} 的聊天紀錄！", userId, campaignId);
-            throw new RuntimeException("您不是此合購單的成員，無法查看聊天紀錄！");
-        }
+        // 歷史訊息允許有效成員與唯讀成員查看，主動退出或被踢除者不得存取。
+        chatAccessService.requireReadable(campaign, userId);
 
         // 依建立時間查詢並排序聊天紀錄
         List<ChatMessage> messages = chatMessageRepository.findByCampaignIdOrderByCreatedAtAsc(campaignId);

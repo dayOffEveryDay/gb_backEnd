@@ -32,6 +32,9 @@ STOMP `CONNECT` 也使用相同 header。
 - `GET /api/v1/public/campaigns/{campaignId}`
 - `GET /api/v1/purchase-requests`
 - `GET /api/v1/purchase-requests/{id}`
+- `GET /api/v1/inquiries`
+- `GET /api/v1/inquiries/similar`
+- `GET /api/v1/inquiries/{id}`
 - `GET /share/campaigns/{campaignId}`
 - `GET /share/purchase-requests/{purchaseRequestId}`
 - `/images/**`
@@ -82,9 +85,9 @@ STOMP `CONNECT` 也使用相同 header。
 ### Purchase request enum values
 
 - `rewardType`: `FIXED` / `QUOTE`
-- `deliveryMethod`: `FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE`
-- `profileType`: `FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE`
-- `locationType`: `TRANSIT_RANGE` / `LANDMARK` / `ROAD` / `DISTRICT` / `ADDRESS` / `STORE` / `CUSTOM`
+- `deliveryMethod`: `FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE` / `IBOX`
+- `profileType`: `FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE` / `IBOX`
+- `status`: `OPEN` / `QUOTING` / `ORDERED` / `AWAITING_REOPEN` / `EXPIRED` / `CANCELLED`
 
 ### Purchase quote status
 
@@ -134,8 +137,7 @@ Response:
   "user": {
     "id": 1,
     "displayName": "A Hui",
-    "profileImageUrl": "https://profile.line-scdn.net/...",
-    "hasCostcoMembership": true
+    "profileImageUrl": "https://profile.line-scdn.net/..."
   }
 }
 ```
@@ -378,8 +380,7 @@ Response:
 
 ```json
 {
-  "displayName": "A Hui",
-  "hasCostcoMembership": true
+  "displayName": "A Hui"
 }
 ```
 
@@ -498,6 +499,16 @@ Response:
 
 `urls` 會依 `app.base-url` 回傳完整後端網址。託購建立或更新收到這類 URL 時，後端會像團購圖片一樣只把 uploads 目錄下的相對 key 寫入 DB，例如 `general/example.jpg`。
 
+團購聊天室權限:
+
+- 團主建立團購後，以及使用者成功參團後，聊天室為 `READ_WRITE`。
+- 主動退出或被踢除後為 `NONE`，不可讀取歷史訊息、訂閱或發言。
+- 團主取消整團或系統判定團主未出現後，原有效成員為 `READ_ONLY`。
+- 團購完成後保留 3 天 `READ_WRITE`，之後改為 `READ_ONLY`。
+- `GET /api/v1/campaigns/{id}/participants/me` 會回傳 `chatAccess`：`READ_WRITE`、`READ_ONLY` 或 `NONE`。
+- 前端應訂閱 `/user/queue/chat-access`；收到 `CHAT_ACCESS_REVOKED` 時立即取消聊天室訂閱並離開畫面。
+- 後端也會在 outbound channel 逐一驗證接收者，已退出或被踢除的既有訂閱不會再收到後續訊息。
+
 ### WebSocket/STOMP
 
 - Endpoint: `/ws`
@@ -550,7 +561,7 @@ Auth: required
 
 Query params:
 
-- `profileType`: optional，`FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE`
+- `profileType`: optional，`FACE_TO_FACE` / `HOME_DELIVERY` / `STORE_TO_STORE` / `IBOX`
 
 Response: `200 OK`
 
@@ -559,17 +570,15 @@ Response: `200 OK`
   {
     "id": 1,
     "profileType": "FACE_TO_FACE",
-    "locationType": "TRANSIT_RANGE",
-    "label": "常用捷運面交",
+    "label": "台北車站面交",
     "city": "台北市",
-    "district": null,
-    "locationName": "板南線",
-    "rangeStart": "府中",
-    "rangeEnd": "市政府",
-    "displayText": "板南線 府中～市政府",
-    "detail": {
-      "transitSystem": "TAIPEI_MRT"
-    },
+    "district": "中正區",
+    "locationName": "台北車站東一門",
+    "locationCode": null,
+    "provider": null,
+    "address": null,
+    "recipientName": null,
+    "recipientPhone": null,
     "isDefault": false,
     "createdAt": "2026-07-03T12:00:00",
     "updatedAt": "2026-07-03T12:00:00"
@@ -588,17 +597,15 @@ Request:
 ```json
 {
   "profileType": "FACE_TO_FACE",
-  "locationType": "TRANSIT_RANGE",
-  "label": "常用捷運面交",
+  "label": "台北車站面交",
   "city": "台北市",
-  "district": null,
-  "locationName": "板南線",
-  "rangeStart": "府中",
-  "rangeEnd": "市政府",
-  "displayText": "板南線 府中～市政府",
-  "detail": {
-    "transitSystem": "TAIPEI_MRT"
-  },
+  "district": "中正區",
+  "locationName": "台北車站東一門",
+  "locationCode": null,
+  "provider": null,
+  "address": null,
+  "recipientName": null,
+  "recipientPhone": null,
   "isDefault": false
 }
 ```
@@ -607,8 +614,9 @@ Response: `201 Created`，body 為完整 `UserDeliveryProfileResponse`。
 
 驗證規則:
 
-- `profileType`、`locationType`、`displayText` 必填。
-- enum 值必須符合本文件「Purchase request enum values」。
+- `profileType` 必填，且必須符合本文件「Purchase request enum values」。
+- `label`、`city`、`district`、`locationName`、`locationCode`、`provider`、`address`、`recipientName`、`recipientPhone` 皆為選填欄位。
+- 前端應依 `profileType` 傳入需要的交付欄位；例如宅配使用 `address` 與收件資料，店到店／i郵箱使用 `provider`、`locationCode` 與 `locationName`。
 
 ### 修改常用交付資料
 
@@ -638,7 +646,7 @@ Response: `204 No Content`
 
 Auth: required
 
-面交 Request:
+Request（面交可選多筆常用交付資料）:
 
 ```json
 {
@@ -649,47 +657,20 @@ Auth: required
   ],
   "rewardType": "FIXED",
   "fixedRewardAmount": 100,
-  "requesterCity": "台北市",
-  "requesterDistrict": "中山區",
   "deliveryMethod": "FACE_TO_FACE",
-  "deliveryPublicSummary": "板南線 府中～市政府、台北車站",
   "requestExpireTime": "2026-07-10T23:59:59",
   "deliveryDeadlineHours": 72,
   "minCreditScore": 80,
-  "selectedProfileIds": [1, 2],
-  "manualMeetupRanges": [
-    {
-      "locationType": "LANDMARK",
-      "city": "台北市",
-      "district": "中正區",
-      "locationName": "台北車站",
-      "rangeStart": null,
-      "rangeEnd": null,
-      "displayText": "台北車站",
-      "detail": {},
-      "latitude": null,
-      "longitude": null
-    }
-  ],
-  "saveManualToProfile": true,
-  "saveDeliveryToProfile": false
+  "selectedProfileIds": [1, 2]
 }
 ```
 
-宅配或店到店時須提供 `deliveryPrivateDetail`，例如:
+宅配、店到店或 i郵箱同樣選取已建立的常用交付資料，例如:
 
 ```json
 {
   "deliveryMethod": "HOME_DELIVERY",
-  "deliveryPublicSummary": "宅配：台北市中山區",
-  "deliveryPrivateDetail": {
-    "receiverName": "王小明",
-    "receiverPhone": "0912345678",
-    "city": "台北市",
-    "district": "中山區",
-    "addressDetail": "中山路 2 段 185 號 2 樓"
-  },
-  "saveDeliveryToProfile": true
+  "selectedProfileIds": [3]
 }
 ```
 
@@ -705,13 +686,14 @@ Response: `201 Created`
 
 主要驗證規則:
 
-- `itemName`、`rewardType`、`requesterCity`、`deliveryMethod`、`deliveryPublicSummary` 必填。
+- `itemName`、`rewardType`、`deliveryMethod`、`requestExpireTime`、`deliveryDeadlineHours`、`selectedProfileIds` 必填。
 - `FIXED` 模式的 `fixedRewardAmount` 必須大於 `0`；`QUOTE` 模式會忽略固定酬金。
 - `requestExpireTime` 必須是未來時間。
 - `deliveryDeadlineHours` 必須大於 `0`，`minCreditScore` 不可小於 `0`。
-- 面交至少需要一筆 `selectedProfileIds` 或 `manualMeetupRanges`。
-- 宅配及店到店必須提供非空的 `deliveryPrivateDetail`。
-- 選取的常用面交資料必須屬於目前登入者，且 `profileType` 必須是 `FACE_TO_FACE`。
+- 至少選擇一筆 `selectedProfileIds`；可選多筆，重複 ID 只建立一份快照。
+- 選取的常用交付資料必須存在且屬於目前登入者。
+- 每筆 profile 的 `profileType` 必須與 `deliveryMethod` 相同。
+- 建立後會將選取資料複製到 `purchase_request_delivery_details`；之後修改或刪除 profile 不影響既有託購單。
 
 ### 取得委託單列表
 
@@ -744,10 +726,22 @@ Response: `200 OK`，`Page<PurchaseRequestSummaryResponse>`
       "imageUrls": ["http://localhost:8080/uploads/general/3c835b6a-552a-473c-aee3-51180c94976d.png"],
       "rewardType": "FIXED",
       "fixedRewardAmount": 100,
-      "requesterCity": "台北市",
-      "requesterDistrict": "中山區",
       "deliveryMethod": "FACE_TO_FACE",
-      "deliveryPublicSummary": "板南線 府中～市政府、台北車站",
+      "deliveryPublicSummary": "台北市中正區 台北車站東一門、台北市信義區 市政府站",
+      "deliveryDetails": [
+        {
+          "id": 31,
+          "city": "台北市",
+          "district": "中正區",
+          "locationName": "台北車站東一門"
+        },
+        {
+          "id": 32,
+          "city": "台北市",
+          "district": "信義區",
+          "locationName": "市政府站"
+        }
+      ],
       "requestExpireTime": "2026-07-10T23:59:59",
       "deliveryDeadlineHours": 72,
       "minCreditScore": 80,
@@ -762,13 +756,13 @@ Response: `200 OK`，`Page<PurchaseRequestSummaryResponse>`
 }
 ```
 
-列表不回傳 `deliveryPrivateDetail`。
+列表的 `deliveryDetails` 只回傳公開欄位。宅配、店到店與 i郵箱不會公開地址、收件資料、來源 profile ID；非面交方式也不公開據點名稱與代碼。
 
 ### 取得委託單詳情
 
 `GET /api/v1/purchase-requests/{id}`
 
-Auth: not required；登入後若為已成立訂單的交易雙方，可取得私密交付資料。
+Auth: not required；委託人以及已成立訂單的交易雙方可取得完整交付快照。
 
 Response: `200 OK`
 
@@ -784,25 +778,16 @@ Response: `200 OK`
   "imageUrls": ["http://localhost:8080/uploads/general/3c835b6a-552a-473c-aee3-51180c94976d.png"],
   "rewardType": "FIXED",
   "fixedRewardAmount": 100,
-  "requesterCity": "台北市",
-  "requesterDistrict": "中山區",
   "deliveryMethod": "FACE_TO_FACE",
-  "deliveryPublicSummary": "板南線 府中～市政府、台北車站",
-  "deliveryPrivateDetail": null,
-  "meetupRanges": [
+  "deliveryPublicSummary": "台北市中正區 台北車站東一門",
+  "deliveryDetails": [
     {
-      "id": 1,
-      "sourceProfileId": 1,
-      "locationType": "TRANSIT_RANGE",
+      "id": 31,
       "city": "台北市",
-      "district": null,
-      "locationName": "板南線",
-      "rangeStart": "府中",
-      "rangeEnd": "市政府",
-      "displayText": "板南線 府中～市政府",
-      "detail": {},
-      "latitude": null,
-      "longitude": null
+      "district": "中正區",
+      "locationName": "台北車站東一門",
+      "locationCode": null,
+      "provider": null
     }
   ],
   "requestExpireTime": "2026-07-10T23:59:59",
@@ -817,11 +802,11 @@ Response: `200 OK`
 }
 ```
 
-`deliveryPrivateDetail` 可見條件:
+`deliveryDetails` 私密欄位（`sourceProfileId`、`address`、`recipientName`、`recipientPhone`）可見條件:
 
-- 委託單已產生 `purchase_orders`。
-- 目前登入者是該訂單的委託人或接單人。
-- 未登入、非交易雙方或尚未成立訂單時固定回傳 `null`。
+- 目前登入者是託購單委託人；或
+- 託購單已產生 `purchase_orders`，且目前登入者是該訂單的委託人或接單人。
+- 未登入或非上述使用者時，私密欄位會因 `NON_NULL` 序列化設定而不出現在 JSON 中。
 
 ### 修改委託單
 
@@ -836,8 +821,7 @@ Request 使用部分更新語意，只需傳入要修改的欄位:
   "itemName": "更新後商品名稱",
   "requestExpireTime": "2026-07-15T23:59:59",
   "deliveryDeadlineHours": 96,
-  "selectedProfileIds": [1],
-  "manualMeetupRanges": []
+  "selectedProfileIds": [1, 2]
 }
 ```
 
@@ -846,10 +830,10 @@ Request 使用部分更新語意，只需傳入要修改的欄位:
 - `ORDERED`、`EXPIRED`、`CANCELLED` 不可修改。
 - `OPEN` 且沒有有效報價時，可修改商品、酬金、交付方式、交付資料與期限。
 - `QUOTING` 或已有 `ACTIVE` 報價時，只能傳入較晚的 `requestExpireTime`。
-- 傳入 `selectedProfileIds` 或 `manualMeetupRanges` 時會重建面交快照。
-- 改成宅配或店到店時必須提供 `deliveryPrivateDetail`。
+- 傳入 `selectedProfileIds` 時會以選取的常用交付資料重建全部交付快照。
+- 修改 `deliveryMethod` 時必須同時傳入 `selectedProfileIds`，且所有 profile 類型須與新的交付方式一致。
 
-Response: `200 OK`，body 為更新後的 `PurchaseRequestDetailResponse`。此操作的 response 不揭露私密交付資料。
+Response: `200 OK`，body 為更新後的 `PurchaseRequestDetailResponse`。委託人可取得完整交付快照。
 
 ### 取消委託單
 
@@ -884,6 +868,22 @@ Request:
 
 - 委託單必須是 `OPEN` 或 `QUOTING`。
 - 新期限必須是未來時間且晚於原期限。
+
+Response: `200 OK`，body 為更新後的 `PurchaseRequestDetailResponse`。
+
+### 重新開放缺貨委託
+
+`POST /api/v1/purchase-requests/{id}/reopen`
+
+Auth: required，只有原委託人可操作。
+
+規則:
+
+- 目前只支援 `FIXED` 固定酬金委託。
+- 委託狀態必須是 `AWAITING_REOPEN`。
+- 委託改回 `OPEN`，`reopenCount` 加 `1`，並將最近重開原因記為 `ITEM_UNAVAILABLE`。
+- 新期限為原期限與「操作當下加 24 小時」兩者中較晚者，不需要 request body。
+- 原本的 `purchase_orders` 維持 `UNAVAILABLE_CANCELLED`；下一次承接會建立新的訂單。
 
 Response: `200 OK`，body 為更新後的 `PurchaseRequestDetailResponse`。
 
@@ -934,6 +934,10 @@ Response: `200 OK`，`Page<PurchaseQuoteResponse>`。
   "id": 2001,
   "purchaseRequestId": 1001,
   "itemName": "莓姬梅酒",
+  "itemImageUrls": [
+    "https://.../purchase-request-image-1.jpg"
+  ],
+  "requesterDisplayName": "委託人",
   "quoterId": 2,
   "quoterDisplayName": "Runner",
   "quoterProfileImageUrl": "https://...",
@@ -1067,7 +1071,7 @@ Response: `200 OK`，`PurchaseOrderDetailResponse`，主要欄位:
 
 - 委託商品、圖片與交易雙方，包含 `requesterProfileImageUrl`、`runnerProfileImageUrl`
 - 固定酬金或得標報價金額
-- `deliveryPrivateDetail` 與面交範圍快照
+- `deliveryDetails` 交付資料快照（訂單雙方可取得完整欄位）
 - 必要方確認、開始、寄出、交貨、完成與取消時間
 - 物流公司、單號與查詢網址
 - 歸責使用者與信用扣分
@@ -1087,6 +1091,299 @@ Auth: required，只有委託人可操作。
 - `QUOTE` 報價模式若接單人尚未確認，需雙方都確認後訂單才改為 `CONFIRMED`。
 
 Response: `200 OK`，`PurchaseOrderDetailResponse`。
+
+## 18. Inquiry API
+
+商品詢問分為兩種 `type`：
+
+- `STOCK`：庫存詢問，建立後固定 14 天到期。
+- `EXPERIENCE`：商品心得，不設定到期時間。
+
+以下文件以 `/api/v1/inquiries` 為正式路徑。為相容詢問頁初版規格，後端也接受相同功能的 `/api/inquiries` 路徑。
+
+### API 一覽
+
+| Method | Path | Auth | 說明 |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/inquiries` | No | 問題列表、搜尋與篩選 |
+| `GET` | `/api/v1/inquiries/similar` | No | 搜尋相似問題，最多 5 筆 |
+| `GET` | `/api/v1/inquiries/{id}` | No | 取得問題詳情與回答 |
+| `POST` | `/api/v1/inquiries` | Yes | 發表問題及上傳附圖 |
+| `POST` | `/api/v1/inquiries/{id}/answers` | Yes | 新增回答 |
+| `PUT` | `/api/v1/inquiries/{inquiryId}/answers/{answerId}` | Yes | 修改自己的回答 |
+| `POST` | `/api/v1/inquiries/{id}/follow` | Yes | 關注問題 |
+| `DELETE` | `/api/v1/inquiries/{id}/follow` | Yes | 取消關注問題 |
+
+### 問題列表、搜尋與篩選
+
+`GET /api/v1/inquiries`
+
+Auth: optional。未登入時 `followed` 固定為 `false`；登入後會回傳目前使用者是否已關注。
+
+Query params:
+
+- `keyword`: optional，搜尋問題標題或商品名稱。
+- `type`: optional，`STOCK` 或 `EXPERIENCE`。
+- `storeId`: optional，指定門市 ID。
+- `page`: optional，預設 `0`。
+- `size`: optional，預設 `20`，範圍 `1` 到 `100`。
+
+Response: `200 OK`，`Page<InquirySummaryResponse>`。每個 `content` 項目如下：
+
+```json
+{
+  "id": 100,
+  "type": "STOCK",
+  "title": "中和店還有葡勝納嗎？",
+  "productName": "葡勝納",
+  "storeId": 3,
+  "storeName": "中和店",
+  "imageUrls": [
+    "http://localhost:8080/uploads/inquiries/example.jpg"
+  ],
+  "status": "OPEN",
+  "answerCount": 3,
+  "followCount": 8,
+  "followed": false,
+  "createdAt": "2026-09-03T10:00:00",
+  "expireTime": "2026-09-17T10:00:00"
+}
+```
+
+`status` 為 `OPEN` 或 `EXPIRED`。`EXPERIENCE` 的 `expireTime` 為 `null`。
+
+### 搜尋相似問題
+
+`GET /api/v1/inquiries/similar?keyword=葡勝納哪裡有&type=STOCK&storeId=3`
+
+Auth: not required
+
+- `keyword`: required，搜尋問題標題或商品名稱。
+- `type`: optional，`STOCK` 或 `EXPERIENCE`。
+- `storeId`: optional，指定門市 ID。
+
+Response: `200 OK`，最多 5 筆：
+
+```json
+[
+  {
+    "id": 100,
+    "title": "葡勝納哪個賣場還有庫存？",
+    "answerCount": 5,
+    "followCount": 12,
+    "createdAt": "2026-09-03T08:00:00"
+  }
+]
+```
+
+### 取得問題詳情
+
+`GET /api/v1/inquiries/{id}`
+
+Auth: optional。登入時會計算 `followed`。
+
+Response: `200 OK`：
+
+```json
+{
+  "id": 100,
+  "type": "STOCK",
+  "title": "葡勝納哪個賣場還有庫存？",
+  "productName": "葡勝納",
+  "content": "最近一直找不到，有人看到嗎？",
+  "storeId": null,
+  "storeName": null,
+  "imageUrls": [
+    "http://localhost:8080/uploads/inquiries/example.jpg"
+  ],
+  "status": "OPEN",
+  "answerCount": 1,
+  "followCount": 12,
+  "followed": true,
+  "createdAt": "2026-09-03T10:00:00",
+  "expireTime": "2026-09-17T10:00:00",
+  "author": {
+    "id": 10,
+    "displayName": "User A",
+    "profileImageUrl": "https://example.com/avatar.jpg"
+  },
+  "answers": [
+    {
+      "id": 201,
+      "storeId": 3,
+      "storeName": "中和店",
+      "stockStatus": "IN_STOCK",
+      "content": "今天晚上七點左右還有看到。",
+      "createdAt": "2026-09-03T11:00:00",
+      "updatedAt": "2026-09-03T11:00:00",
+      "author": {
+        "id": 11,
+        "displayName": "User B",
+        "profileImageUrl": "https://example.com/avatar-b.jpg"
+      }
+    }
+  ]
+}
+```
+
+問題不存在時回傳 `404 Not Found`。
+
+### 發表問題與上傳圖片
+
+`POST /api/v1/inquiries`
+
+Auth: required
+
+Content-Type: `multipart/form-data`
+
+Form parts:
+
+- `request`: required，Content-Type 為 `application/json` 的問題資料。
+- `images`: optional，圖片檔案，可重複傳送，最多 3 張。
+
+`request` 範例：
+
+```json
+{
+  "type": "STOCK",
+  "title": "中和店有明太子醬嗎？",
+  "productName": "明太子醬",
+  "storeId": 3,
+  "content": "最近有人看到嗎？"
+}
+```
+
+規則:
+
+- `type`、`title` 必填；`productName`、`storeId`、`content` 選填。
+- `type` 僅能為 `STOCK` 或 `EXPERIENCE`。
+- `storeId` 有值時必須是已存在的門市。
+- 圖片必須為 image content type，且最多 3 張；後端負責產生檔名、壓縮與儲存。
+- `STOCK` 建立時自動將 `expireTime` 設為建立後 14 天；`EXPERIENCE` 的 `expireTime` 為 `null`。
+
+Response: `201 Created`，body 為完整 `InquiryDetailResponse`。
+
+### 新增回答
+
+`POST /api/v1/inquiries/{id}/answers`
+
+Auth: required
+
+STOCK 問題 request：
+
+```json
+{
+  "storeId": 3,
+  "stockStatus": "IN_STOCK",
+  "content": "今天晚上七點左右還有看到。"
+}
+```
+
+EXPERIENCE 問題 request：
+
+```json
+{
+  "content": "我覺得滿好吃的，但口味比較重。"
+}
+```
+
+規則:
+
+- `STOCK` 回答的 `content` 選填，可只回報門市或庫存狀態。
+- `EXPERIENCE` 回答的 `content` 必填，且不可為純空白。
+- `stockStatus` 可為 `IN_STOCK`、`LOW_STOCK`、`OUT_OF_STOCK` 或 `UNKNOWN`；只適用 `STOCK` 問題。
+- `EXPERIENCE` 回答不可填寫 `storeId` 或 `stockStatus`。
+- `EXPIRED` 問題不可新增回答。
+- 同一位使用者可以對同一問題新增多筆回答；每筆回答均可透過各自的 `answerId` 修改。
+- 成功後會通知發問者及所有關注者，回答者本人不會收到這筆回答通知；通知類型為 `INQUIRY_NEW_ANSWER`。
+
+Response: `201 Created`：
+
+```json
+{
+  "id": 201,
+  "storeId": 3,
+  "storeName": "中和店",
+  "stockStatus": "IN_STOCK",
+  "content": "今天晚上七點左右還有看到。",
+  "createdAt": "2026-09-03T11:00:00",
+  "updatedAt": "2026-09-03T11:00:00",
+  "author": {
+    "id": 11,
+    "displayName": "User B",
+    "profileImageUrl": "https://example.com/avatar-b.jpg"
+  }
+}
+```
+
+所有回答回應都包含 `author`，其中 `author.profileImageUrl` 為回答者頭像網址，前端可直接用於回答列表與詳情顯示。
+
+### 修改自己的回答
+
+`PUT /api/v1/inquiries/{inquiryId}/answers/{answerId}`
+
+Auth: required
+
+Request 格式與新增回答相同：
+
+```json
+{
+  "storeId": 3,
+  "stockStatus": "LOW_STOCK",
+  "content": "下午再去看時只剩少量。"
+}
+```
+
+規則:
+
+- 只有回答建立者本人可以修改。
+- `answerId` 必須屬於 URL 中的 `inquiryId`。
+- 不能修改 `EXPIRED` 問題的回答。
+- `STOCK` 與 `EXPERIENCE` 的內容、門市與庫存狀態驗證規則與新增回答相同。
+- 回傳的 `updatedAt` 是本次修改完成時間；前端可在 `updatedAt` 與 `createdAt` 不同時顯示已編輯標記。
+- 修改回答不會發送新回答通知。
+
+Response: `200 OK`，body 為更新後的 `InquiryAnswerResponse`。
+
+### 關注與取消關注
+
+`POST /api/v1/inquiries/{id}/follow`
+
+Auth: required
+
+Response: `200 OK`
+
+```json
+{
+  "followed": true
+}
+```
+
+此操作為冪等操作；已關注時再次呼叫仍回傳成功。`EXPIRED` 問題不可新增關注。
+
+`DELETE /api/v1/inquiries/{id}/follow`
+
+Auth: required
+
+Response: `200 OK`
+
+```json
+{
+  "followed": false
+}
+```
+
+取消關注同樣為冪等操作，原本未關注時也會成功回傳 `followed: false`。
+
+### 到期排程與通知
+
+`InquiryScheduler.expireStockInquiries` 每分鐘執行一次：
+
+- 將 `expireTime` 已到的 `STOCK` 問題從 `OPEN` 更新為 `EXPIRED`。
+- 問題仍可搜尋與讀取歷史回答，但不可新增回答或關注。
+- 若問題到期前沒有任何回答，會通知發問者及全部關注者；通知類型為 `INQUIRY_EXPIRED_NO_ANSWER`。
+
+## 19. Purchase Order API（補充）
 
 ### 提出訂單異常
 
@@ -1311,7 +1608,8 @@ Request:
 - 訂單必須是 `WAITING_CONFIRMATION`、`CONFIRMED` 或 `IN_PROGRESS`。
 - 訂單改為 `UNAVAILABLE_CANCELLED`，不扣信用分。
 - 原得標報價改為 `UNAVAILABLE_CANCELLED`。
-- 原委託未過期時重新開放，否則改為 `EXPIRED`。
+- 固定酬金委託改為 `AWAITING_REOPEN`，等待委託人決定是否重新開放。
+- 報價制委託維持既有規則：原委託未過期時重新開放，否則改為 `EXPIRED`。
 - 原因、門市與證據圖片寫入訂單事件 metadata。
 
 Response: `200 OK`，`PurchaseOrderDetailResponse`。
@@ -1367,7 +1665,7 @@ Request:
 }
 ```
 
-- 交付方式必須是 `HOME_DELIVERY` 或 `STORE_TO_STORE`。
+- 交付方式必須是 `HOME_DELIVERY`、`STORE_TO_STORE` 或 `IBOX`。
 - 訂單必須是 `IN_PROGRESS`。
 - `logisticsProvider`、`trackingNumber` 必填。
 - 成功後改為 `SHIPPED`。

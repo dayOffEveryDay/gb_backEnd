@@ -19,6 +19,7 @@ import java.security.Principal;
 public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private final JwtService jwtService;
+    private final WebSocketSessionRegistry sessionRegistry;
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
@@ -44,8 +45,9 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                     // 這樣 Spring 才知道這個連線的主人是誰，convertAndSendToUser 才能精準投遞！
                     Principal userPrincipal = () -> userIdStr; // 這裡的名字必須是字串型態的 userId
                     accessor.setUser(userPrincipal);
+                    sessionRegistry.register(accessor.getSessionId(), userId);
 
-                    log.info("WebSocket 連線成功，已綁定使用者 ID: {}", userId);
+//                    log.info("WebSocket 連線成功，已綁定使用者 ID: {}", userId);
                 } catch (Exception e) {
                     log.error("WebSocket JWT 驗證失敗: {}", e.getMessage());
                     throw new IllegalArgumentException("無效的 Token，拒絕連線！");
@@ -53,6 +55,9 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
             } else {
                 throw new IllegalArgumentException("缺少 Token，拒絕連線！");
             }
+        }
+        if (StompCommand.DISCONNECT.equals(accessor.getCommand())) {
+            sessionRegistry.remove(accessor.getSessionId());
         }
         return message;
     }

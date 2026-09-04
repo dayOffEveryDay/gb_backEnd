@@ -10,4 +10,6 @@ public class MyParticipationResponse {
     private boolean isHost;
     private boolean isJoined;  // 是否已參團
     private Integer quantity;  // 認購的數量 (如果沒參團就是 0)
+    // 聊天室權限：READ_WRITE、READ_ONLY、NONE
+    private String chatAccess;
 }

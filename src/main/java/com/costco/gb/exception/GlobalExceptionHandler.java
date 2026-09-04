@@ -38,7 +38,7 @@ public class GlobalExceptionHandler {
 
     /**
      * 1. 攔截我們自己寫的商業邏輯錯誤 (RuntimeException)
-     * 例如：手腳太慢啦、沒有好市多會員卡、無法評價自己 等等
+     * 例如：手腳太慢啦、無法評價自己 等等
      */
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ErrorResponse> handleRuntimeException(RuntimeException ex, HttpServletRequest request) {

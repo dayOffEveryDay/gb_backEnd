@@ -113,6 +113,14 @@ public class PurchaseRequestController {
         ));
     }
 
+    @PostMapping("/{id}/reopen")
+    public ResponseEntity<PurchaseRequestDetailResponse> reopen(
+            Authentication authentication,
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.ok(purchaseRequestService.reopen(currentUserId(authentication), id));
+    }
+
     @PostMapping("/{id}/quotes")
     public ResponseEntity<PurchaseQuoteResponse> createQuote(
             Authentication authentication,

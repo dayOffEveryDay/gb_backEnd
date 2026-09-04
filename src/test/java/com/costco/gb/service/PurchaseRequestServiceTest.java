@@ -1,18 +1,15 @@
 package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreatePurchaseRequestRequest;
-import com.costco.gb.dto.request.MeetupRangeRequest;
 import com.costco.gb.dto.request.UpdatePurchaseRequestRequest;
 import com.costco.gb.dto.response.PurchaseRequestDetailResponse;
+import com.costco.gb.dto.response.PurchaseRequestDeliveryDetailResponse;
 import com.costco.gb.entity.PurchaseOrder;
 import com.costco.gb.entity.PurchaseRequest;
-import com.costco.gb.entity.PurchaseRequestMeetupRange;
 import com.costco.gb.entity.User;
 import com.costco.gb.repository.PurchaseOrderRepository;
 import com.costco.gb.repository.PurchaseQuoteRepository;
-import com.costco.gb.repository.PurchaseRequestMeetupRangeRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
-import com.costco.gb.repository.UserDeliveryProfileRepository;
 import com.costco.gb.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,11 +22,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,9 +38,7 @@ class PurchaseRequestServiceTest {
     @Mock
     private PurchaseRequestRepository purchaseRequestRepository;
     @Mock
-    private PurchaseRequestMeetupRangeRepository meetupRangeRepository;
-    @Mock
-    private UserDeliveryProfileRepository profileRepository;
+    private PurchaseDeliveryService purchaseDeliveryService;
     @Mock
     private PurchaseQuoteRepository quoteRepository;
     @Mock
@@ -68,7 +61,7 @@ class PurchaseRequestServiceTest {
     }
 
     @Test
-    @DisplayName("建立面交委託時應保存快照並忽略私密交付資料")
+    @DisplayName("建立面交託購時應從多筆常用交付資料保存快照")
     void createFaceToFaceRequestSavesSnapshot() {
         CreatePurchaseRequestRequest request = validFaceToFaceRequest();
         when(userRepository.findById(1L)).thenReturn(Optional.of(requester));
@@ -77,18 +70,13 @@ class PurchaseRequestServiceTest {
             entity.setId(10L);
             return entity;
         });
-        when(profileRepository.findAllById(List.of())).thenReturn(List.of());
-
         Long requestId = purchaseRequestService.create(1L, request);
 
         assertEquals(10L, requestId);
         ArgumentCaptor<PurchaseRequest> requestCaptor = ArgumentCaptor.forClass(PurchaseRequest.class);
         verify(purchaseRequestRepository).save(requestCaptor.capture());
-        assertNull(requestCaptor.getValue().getDeliveryPrivateDetail());
-
-        ArgumentCaptor<List<PurchaseRequestMeetupRange>> rangesCaptor = ArgumentCaptor.forClass(List.class);
-        verify(meetupRangeRepository).saveAll(rangesCaptor.capture());
-        assertEquals("台北車站", rangesCaptor.getValue().get(0).getDisplayText());
+        assertEquals("FACE_TO_FACE", requestCaptor.getValue().getDeliveryMethod());
+        verify(purchaseDeliveryService).replaceSnapshots(requestCaptor.getValue(), List.of(11L, 12L));
     }
 
     @Test
@@ -125,10 +113,9 @@ class PurchaseRequestServiceTest {
     }
 
     @Test
-    @DisplayName("私密交付資料只提供給已成立訂單的交易雙方")
+    @DisplayName("完整交付快照只提供給已成立訂單的交易雙方")
     void detailOnlyShowsPrivateDeliveryToOrderParties() {
         PurchaseRequest purchaseRequest = basePurchaseRequest("ORDERED", "HOME_DELIVERY");
-        purchaseRequest.setDeliveryPrivateDetail(Map.of("addressDetail", "中山路 1 號"));
         User runner = User.builder().id(2L).displayName("接單人").build();
         PurchaseOrder order = PurchaseOrder.builder()
                 .purchaseRequest(purchaseRequest)
@@ -138,31 +125,66 @@ class PurchaseRequestServiceTest {
         when(purchaseRequestRepository.findById(10L)).thenReturn(Optional.of(purchaseRequest));
         when(orderRepository.findFirstByPurchaseRequestIdOrderByCreatedAtDesc(10L))
                 .thenReturn(Optional.of(order));
+        PurchaseRequestDeliveryDetailResponse privateDetail = PurchaseRequestDeliveryDetailResponse.builder()
+                .id(21L).city("台北市").address("中山路 1 號").recipientPhone("0912345678").build();
+        PurchaseRequestDeliveryDetailResponse publicDetail = PurchaseRequestDeliveryDetailResponse.builder()
+                .id(21L).city("台北市").build();
+        when(purchaseDeliveryService.read(purchaseRequest, true)).thenReturn(List.of(privateDetail));
+        when(purchaseDeliveryService.read(purchaseRequest, false)).thenReturn(List.of(publicDetail));
+        when(purchaseDeliveryService.publicSummary(any(), any())).thenReturn("台北市");
 
         PurchaseRequestDetailResponse runnerView = purchaseRequestService.getDetail(10L, 2L);
         PurchaseRequestDetailResponse strangerView = purchaseRequestService.getDetail(10L, 3L);
 
-        assertEquals("中山路 1 號", runnerView.getDeliveryPrivateDetail().get("addressDetail"));
-        assertNull(strangerView.getDeliveryPrivateDetail());
+        assertEquals("中山路 1 號", runnerView.getDeliveryDetails().get(0).getAddress());
+        assertEquals(null, strangerView.getDeliveryDetails().get(0).getAddress());
+    }
+
+    @Test
+    @DisplayName("固定價缺貨委託重新開放時應自動補足二十四小時期限")
+    void reopenUnavailableFixedRequestExtendsExpiredDeadline() {
+        PurchaseRequest purchaseRequest = basePurchaseRequest("AWAITING_REOPEN", "FACE_TO_FACE");
+        purchaseRequest.setRequestExpireTime(LocalDateTime.now().minusHours(2));
+        purchaseRequest.setReopenCount(0);
+        purchaseRequest.setExpiredAt(LocalDateTime.now().minusHours(1));
+        when(purchaseRequestRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(purchaseRequest));
+        when(purchaseDeliveryService.read(purchaseRequest, true)).thenReturn(List.of());
+
+        LocalDateTime beforeReopen = LocalDateTime.now();
+        PurchaseRequestDetailResponse response = purchaseRequestService.reopen(1L, 10L);
+
+        assertEquals("OPEN", response.getStatus());
+        assertEquals(1, response.getReopenCount());
+        assertTrue(response.getRequestExpireTime().isAfter(beforeReopen.plusHours(23)));
+        assertEquals(null, response.getExpiredAt());
+        assertEquals("ITEM_UNAVAILABLE", purchaseRequest.getLastReopenReason());
+        verify(purchaseRequestRepository).save(purchaseRequest);
+    }
+
+    @Test
+    @DisplayName("非委託人不得重新開放缺貨委託")
+    void reopenUnavailableFixedRequestRejectsNonOwner() {
+        PurchaseRequest purchaseRequest = basePurchaseRequest("AWAITING_REOPEN", "FACE_TO_FACE");
+        when(purchaseRequestRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(purchaseRequest));
+
+        RuntimeException exception = assertThrows(
+                RuntimeException.class,
+                () -> purchaseRequestService.reopen(2L, 10L)
+        );
+
+        assertEquals("只有委託人可以重新開放此委託單", exception.getMessage());
+        verify(purchaseRequestRepository, never()).save(any(PurchaseRequest.class));
     }
 
     private CreatePurchaseRequestRequest validFaceToFaceRequest() {
-        MeetupRangeRequest range = new MeetupRangeRequest();
-        range.setLocationType("LANDMARK");
-        range.setCity("台北市");
-        range.setDisplayText("台北車站");
-
         CreatePurchaseRequestRequest request = new CreatePurchaseRequestRequest();
         request.setItemName("Costco 商品");
         request.setRewardType("FIXED");
         request.setFixedRewardAmount(100);
-        request.setRequesterCity("台北市");
         request.setDeliveryMethod("FACE_TO_FACE");
-        request.setDeliveryPublicSummary("台北車站");
-        request.setDeliveryPrivateDetail(Map.of("shouldNot", "persist"));
         request.setRequestExpireTime(LocalDateTime.now().plusDays(3));
         request.setDeliveryDeadlineHours(72);
-        request.setManualMeetupRanges(List.of(range));
+        request.setSelectedProfileIds(List.of(11L, 12L));
         return request;
     }
 
@@ -173,9 +195,7 @@ class PurchaseRequestServiceTest {
                 .itemName("Costco 商品")
                 .rewardType("FIXED")
                 .fixedRewardAmount(100)
-                .requesterCity("台北市")
                 .deliveryMethod(deliveryMethod)
-                .deliveryPublicSummary("台北市")
                 .requestExpireTime(LocalDateTime.now().plusDays(3))
                 .deliveryDeadlineHours(72)
                 .minCreditScore(0)

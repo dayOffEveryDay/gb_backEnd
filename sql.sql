@@ -101,7 +101,6 @@ CREATE TABLE users (
     line_uid VARCHAR(255) UNIQUE NOT NULL COMMENT 'Line 授權 UID',
     display_name VARCHAR(255) NOT NULL COMMENT '顯示暱稱',
     profile_image_url VARCHAR(512) COMMENT '頭像連結',
-    has_costco_membership BOOLEAN DEFAULT FALSE COMMENT '是否有好市多會員卡 (限制開團權限)',
     
     -- 信用與交易指標
     credit_score INT DEFAULT 100 COMMENT '綜合信用評分 (受評價影響)',
@@ -202,7 +201,7 @@ CREATE TABLE `participants` (
   `campaign_id` bigint NOT NULL COMMENT '所屬合購單',
   `user_id` bigint NOT NULL COMMENT '參與者',
   `quantity` int NOT NULL COMMENT '認購數量',
-  `status` varchar(50) DEFAULT 'JOINED' COMMENT '狀態 (JOINED, CANCELLED, NO_SHOW)',
+  `status` varchar(50) DEFAULT 'JOINED' COMMENT 'JOINED, CONFIRMED, DISPUTED, NO_SHOW, CANCELLED, KICKED, CANCELLED_BY_HOST, CANCELLED_BY_SYSTEM',
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `dispute_reason` varchar(500) DEFAULT NULL,
@@ -284,125 +283,153 @@ CREATE TABLE credit_score_logs (
 );
 
 -- 使用者常用交付資料表
-CREATE TABLE user_delivery_profiles (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-
-    user_id BIGINT NOT NULL COMMENT '使用者ID',
-
-    profile_type VARCHAR(30) NOT NULL COMMENT 'FACE_TO_FACE, HOME_DELIVERY, STORE_TO_STORE',
-    location_type VARCHAR(30) NULL COMMENT 'TRANSIT_RANGE, LANDMARK, ROAD, DISTRICT, ADDRESS, STORE, CUSTOM',
-
-    label VARCHAR(100) NULL COMMENT '使用者自訂名稱，例如：家裡、公司、常用面交點',
-
-    city VARCHAR(50) NULL COMMENT '縣市',
-    district VARCHAR(50) NULL COMMENT '行政區',
-
-    location_name VARCHAR(100) NULL COMMENT '地標、路線、道路、店名或地址摘要',
-    range_start VARCHAR(100) NULL COMMENT '起點，例如：府中、一段',
-    range_end VARCHAR(100) NULL COMMENT '終點，例如：市政府、二段',
-
-    display_text VARCHAR(255) NOT NULL COMMENT '前端顯示文字，例如：板南線 府中～市政府',
-
-    detail JSON NULL COMMENT '完整資料，保留彈性',
-
-    is_default BOOLEAN DEFAULT FALSE COMMENT '是否預設',
-
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_user_delivery_profiles_user
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-
-    INDEX idx_user_delivery_profiles_user_type (user_id, profile_type),
-    INDEX idx_user_delivery_profiles_city_type (city, location_type)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='使用者常用交付資料表';
+CREATE TABLE `user_delivery_profiles` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` bigint NOT NULL COMMENT '使用者ID',
+  `profile_type` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'FACE_TO_FACE 面交, STORE_TO_STORE 店到店, HOME_DELIVERY 宅配, IBOX i郵箱',
+  `label` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '使用者自訂名稱，例如：家裡、公司、常用面交點',
+  `city` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '縣市',
+  `district` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '行政區',
+  `location_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '面交地點補充、超商門市名稱、i郵箱名稱',
+  `location_code` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '門市代碼、i郵箱代碼等外部據點識別碼',
+  `provider` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '交付服務提供者，例如 7_ELEVEN、FAMILY_MART、IBOX',
+  `address` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '完整宅配地址，主要供 HOME_DELIVERY 使用',
+  `recipient_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '收件人姓名',
+  `recipient_phone` varchar(30) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '收件人電話',
+  `is_default` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否為此交付類型的預設資料',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_delivery_profiles_user_type` (`user_id`,`profile_type`),
+  KEY `idx_user_delivery_profiles_area` (`city`,`district`),
+  KEY `idx_user_delivery_profiles_provider_location` (`provider`,`location_code`),
+  CONSTRAINT `fk_user_delivery_profiles_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='使用者常用交付資料表';
 
 -- 委託單主表
-CREATE TABLE purchase_requests (
+CREATE TABLE `purchase_requests` (
+  `id` bigint NOT NULL AUTO_INCREMENT
+    COMMENT '託購單ID',
+
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP
+    COMMENT '建立時間',
+
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    COMMENT '最後更新時間',
+
+  `cancelled_at` datetime(6) DEFAULT NULL
+    COMMENT '取消時間',
+
+  `delivery_deadline_hours` int NOT NULL
+    COMMENT '託購成立後，要求在幾小時內完成交付',
+
+  `delivery_method` varchar(30) NOT NULL
+    COMMENT '交付方式：FACE_TO_FACE 面交、STORE_TO_STORE 店到店、IBOX i郵箱、HOME_DELIVERY 宅配',
+
+  `expired_at` datetime(6) DEFAULT NULL
+    COMMENT '託購單實際過期時間',
+
+  `fixed_reward_amount` int DEFAULT NULL
+    COMMENT '固定酬金金額，reward_type=FIXED 時使用',
+
+  `image_urls` json DEFAULT NULL
+    COMMENT '商品圖片URL或檔名陣列',
+
+  `item_description` text
+    COMMENT '託購商品補充說明',
+
+  `item_name` varchar(255) NOT NULL
+    COMMENT '託購商品名稱',
+
+  `last_reopen_reason` varchar(100) DEFAULT NULL
+    COMMENT '最近一次重新開放託購單的原因',
+
+  `min_credit_score` int NOT NULL DEFAULT '0'
+    COMMENT '承接者最低信用分數限制',
+
+  `reopen_count` int NOT NULL DEFAULT '0'
+    COMMENT '託購單重新開放次數',
+
+  `request_expire_time` datetime(6) NOT NULL
+    COMMENT '託購需求截止時間，超過後不可再承接或報價',
+
+  `reward_type` varchar(30) NOT NULL
+    COMMENT '酬金模式：FIXED 固定酬金、QUOTE 承接者報價',
+
+  `status` varchar(50) NOT NULL DEFAULT 'OPEN'
+    COMMENT '託購狀態：OPEN 開放中、QUOTING 報價中、ORDERED 已成立、AWAITING_REOPEN 缺貨待決定、EXPIRED 已過期、CANCELLED 已取消',
+
+  `requester_id` bigint NOT NULL
+    COMMENT '託購發起會員ID',
+
+  PRIMARY KEY (`id`),
+
+  KEY `idx_purchase_requests_status_expire` (`status`,`request_expire_time`),
+
+  KEY `idx_purchase_requests_requester_status` (`requester_id`,`status`),
+
+  KEY `idx_purchase_requests_reward_status` (`reward_type`,`status`),
+
+  KEY `idx_purchase_requests_delivery_status` (`delivery_method`,`status`),
+
+  CONSTRAINT `fk_purchase_requests_requester`
+    FOREIGN KEY (`requester_id`)
+    REFERENCES `users` (`id`)
+
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='託購需求主表';
+
+-- 託購單交付資料快照
+CREATE TABLE purchase_request_delivery_details (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    request_id BIGINT NOT NULL
+        COMMENT '託購單 ID',
+    source_profile_id BIGINT NULL
+        COMMENT '來源 user_delivery_profiles.id，僅供追蹤，不作為實際交付資料來源',
+    city VARCHAR(50) NULL
+        COMMENT '縣市',
+    district VARCHAR(50) NULL
+        COMMENT '行政區',
+    location_name VARCHAR(255) NULL
+        COMMENT '面交地點補充、超商門市名稱、i郵箱名稱',
+    location_code VARCHAR(100) NULL
+        COMMENT '超商門市代碼、i郵箱代碼',
+    provider VARCHAR(50) NULL
+        COMMENT '7_ELEVEN、FAMILY_MART、IBOX 等',
+    address VARCHAR(255) NULL
+        COMMENT '宅配完整地址',
+    recipient_name VARCHAR(100) NULL
+        COMMENT '收件人姓名',
+    recipient_phone VARCHAR(30) NULL
+        COMMENT '收件人電話',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    requester_id BIGINT NOT NULL COMMENT '委託人ID',
+    CONSTRAINT fk_purchase_request_delivery_details_request
+        FOREIGN KEY (request_id)
+        REFERENCES purchase_requests(id)
+        ON DELETE CASCADE,
 
-    item_name VARCHAR(255) NOT NULL COMMENT '託購商品名稱',
-    item_description TEXT NULL COMMENT '商品補充說明',
-    image_urls JSON NULL COMMENT '商品圖片，多張圖片用 JSON 陣列',
-
-    reward_type VARCHAR(30) NOT NULL COMMENT 'FIXED, QUOTE',
-    fixed_reward_amount INT NULL COMMENT '固定酬金金額，reward_type=FIXED 時必填',
-
-    requester_city VARCHAR(50) NOT NULL COMMENT '委託者所在城市',
-    requester_district VARCHAR(50) NULL COMMENT '委託者所在行政區',
-
-    delivery_method VARCHAR(30) NOT NULL COMMENT 'FACE_TO_FACE, HOME_DELIVERY, STORE_TO_STORE',
-    delivery_public_summary VARCHAR(255) NOT NULL COMMENT '公開顯示交貨摘要',
-    delivery_private_detail JSON NULL COMMENT '成立後才顯示的私密交貨資料，例如宅配地址、電話、店到店資訊',
-
-    request_expire_time DATETIME NOT NULL COMMENT '委託期限，超過後未成立則過期',
-    delivery_deadline_hours INT NOT NULL COMMENT '訂單成立後幾小時內需完成交貨',
-
-    min_credit_score INT DEFAULT 0 COMMENT '最低信用分限制',
-
-    status VARCHAR(50) NOT NULL DEFAULT 'OPEN'
-        COMMENT 'OPEN, QUOTING, ORDERED, EXPIRED, CANCELLED',
-
-    reopen_count INT DEFAULT 0 COMMENT '重新開放次數',
-    last_reopen_reason VARCHAR(100) NULL COMMENT '最後重新開放原因',
-
-    cancelled_at DATETIME NULL COMMENT '委託單取消時間',
-    expired_at DATETIME NULL COMMENT '委託單過期時間',
-
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_purchase_requests_requester
-        FOREIGN KEY (requester_id) REFERENCES users(id),
-
-    INDEX idx_purchase_requests_status_expire (status, request_expire_time),
-    INDEX idx_purchase_requests_requester_status (requester_id, status),
-    INDEX idx_purchase_requests_city_status (requester_city, status),
-    INDEX idx_purchase_requests_reward_status (reward_type, status),
-    INDEX idx_purchase_requests_delivery_status (delivery_method, status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='託購委託單主表';
-
--- 委託單面交範圍快照表
-CREATE TABLE purchase_request_meetup_ranges (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-
-    request_id BIGINT NOT NULL COMMENT '委託單ID',
-
-    source_profile_id BIGINT NULL COMMENT '來源常用交付資料ID，手動輸入則為NULL',
-
-    location_type VARCHAR(30) NOT NULL COMMENT 'TRANSIT_RANGE, LANDMARK, ROAD, DISTRICT, CUSTOM',
-
-    city VARCHAR(50) NULL COMMENT '縣市',
-    district VARCHAR(50) NULL COMMENT '行政區',
-
-    location_name VARCHAR(100) NULL COMMENT '地標、路線、道路名稱',
-    range_start VARCHAR(100) NULL COMMENT '起點，例如：府中、一段',
-    range_end VARCHAR(100) NULL COMMENT '終點，例如：市政府、二段',
-
-    display_text VARCHAR(255) NOT NULL COMMENT '顯示文字，例如：板南線 府中～市政府',
-
-    detail JSON NULL COMMENT '完整資料快照',
-
-    latitude DECIMAL(10, 7) NULL COMMENT '緯度，可選',
-    longitude DECIMAL(10, 7) NULL COMMENT '經度，可選',
-
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_purchase_request_meetup_ranges_request
-        FOREIGN KEY (request_id) REFERENCES purchase_requests(id) ON DELETE CASCADE,
-
-    CONSTRAINT fk_purchase_request_meetup_ranges_profile
-        FOREIGN KEY (source_profile_id) REFERENCES user_delivery_profiles(id) ON DELETE SET NULL,
-
-    INDEX idx_purchase_request_meetup_ranges_request (request_id),
-    INDEX idx_purchase_request_meetup_ranges_city_type (city, location_type),
-    INDEX idx_purchase_request_meetup_ranges_location (location_name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='委託單面交範圍快照表';
+    CONSTRAINT fk_purchase_request_delivery_details_profile
+        FOREIGN KEY (source_profile_id)
+        REFERENCES user_delivery_profiles(id)
+        ON DELETE SET NULL,
+    INDEX idx_pr_delivery_details_request (
+        request_id
+    ),
+    INDEX idx_pr_delivery_details_area (
+        city,
+        district
+    ),
+    INDEX idx_pr_delivery_details_provider_location (
+        provider,
+        location_code
+    )
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='託購單交付資料快照';
 
 -- 報價單表
 CREATE TABLE purchase_quotes (
@@ -589,4 +616,145 @@ CREATE TABLE purchase_order_reviews (
     INDEX idx_purchase_reviews_reviewee_time (reviewee_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='託購訂單評價';
 
---
+-- 問題主表
+CREATE TABLE inquiries (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY
+        COMMENT '問題 ID',
+
+    user_id BIGINT NOT NULL
+        COMMENT '發問者使用者 ID，關聯 users.id',
+
+    type VARCHAR(50) NOT NULL
+        COMMENT '問題類型：STOCK=庫存詢問、EXPERIENCE=商品心得或使用體驗',
+
+    title VARCHAR(255) NOT NULL
+        COMMENT '問題標題，例如：中和店有明太子醬嗎？',
+
+    product_name VARCHAR(255) NULL
+        COMMENT '商品名稱，例如：明太子醬、葡勝納',
+
+    store_id INT NULL
+        COMMENT '指定詢問門市 ID，關聯 stores.id；NULL 表示不限門市或未指定門市',
+
+    content TEXT NULL
+        COMMENT '問題詳細內容',
+
+    image_urls VARCHAR(1024) NULL
+        COMMENT '問題附圖檔名或圖片路徑，多張圖片以逗號分隔，最多 3 張',
+
+    status VARCHAR(50) NOT NULL DEFAULT 'OPEN'
+        COMMENT '問題狀態：OPEN=開放回答、EXPIRED=已過期',
+
+    expire_time DATETIME NULL
+        COMMENT '問題到期時間；STOCK 庫存問題固定為建立後 14 天，EXPERIENCE 心得問題可為 NULL',
+
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT '問題建立時間',
+
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT '問題最後更新時間',
+
+    CONSTRAINT fk_inquiries_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id),
+
+    CONSTRAINT fk_inquiries_store
+        FOREIGN KEY (store_id)
+        REFERENCES stores(id),
+
+    INDEX idx_inquiry_user (user_id),
+
+    INDEX idx_inquiry_type_status (type, status),
+
+    INDEX idx_inquiry_store_status (store_id, status),
+
+    INDEX idx_inquiry_expire_time (expire_time),
+
+    INDEX idx_inquiry_created_at (created_at),
+
+    INDEX idx_inquiry_product_name (product_name)
+
+) COMMENT='商品詢問問題主表';
+
+-- 問題回答表
+CREATE TABLE inquiry_answers (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY
+        COMMENT '回答 ID',
+
+    inquiry_id BIGINT NOT NULL
+        COMMENT '所屬問題 ID，關聯 inquiries.id',
+
+    user_id BIGINT NOT NULL
+        COMMENT '回答者使用者 ID，關聯 users.id',
+
+    store_id INT NULL
+        COMMENT '此回答所回報的門市 ID，關聯 stores.id；庫存問題可填寫，心得問題通常為 NULL',
+
+    stock_status VARCHAR(50) NULL
+        COMMENT '庫存狀態：IN_STOCK=有貨、LOW_STOCK=少量、OUT_OF_STOCK=無貨、UNKNOWN=不確定；心得問題可為 NULL',
+
+    content TEXT
+        COMMENT '回答內容',
+
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT '回答建立時間',
+
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+        COMMENT '回答最後更新時間',
+
+    CONSTRAINT fk_inquiry_answers_inquiry
+        FOREIGN KEY (inquiry_id)
+        REFERENCES inquiries(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_inquiry_answers_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id),
+
+    CONSTRAINT fk_inquiry_answers_store
+        FOREIGN KEY (store_id)
+        REFERENCES stores(id),
+
+    INDEX idx_answer_inquiry (inquiry_id),
+
+    INDEX idx_answer_user (user_id),
+
+    INDEX idx_answer_store (store_id),
+
+    INDEX idx_answer_created_at (created_at)
+
+) COMMENT='商品詢問回答表';
+
+-- 問題關注表
+CREATE TABLE inquiry_follows (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY
+        COMMENT '問題關注紀錄 ID',
+
+    inquiry_id BIGINT NOT NULL
+        COMMENT '被關注的問題 ID，關聯 inquiries.id',
+
+    user_id BIGINT NOT NULL
+        COMMENT '關注問題的使用者 ID，關聯 users.id',
+
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        COMMENT '開始關注時間',
+
+    CONSTRAINT fk_inquiry_follows_inquiry
+        FOREIGN KEY (inquiry_id)
+        REFERENCES inquiries(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_inquiry_follows_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+    UNIQUE KEY uk_inquiry_follow (inquiry_id, user_id),
+
+    INDEX idx_inquiry_follow_user (user_id),
+
+    INDEX idx_inquiry_follow_inquiry (inquiry_id)
+
+) COMMENT='使用者關注商品詢問問題紀錄表';

@@ -183,4 +183,17 @@ public class NotificationService {
         log.info("已向聊天室 {} 廣播狀態變更: {}", campaignId, status);
     }
 
+    public void broadcastChatAccessRevoked(Long campaignId, Long userId, String reason) {
+        // 通知已開啟聊天室的指定使用者立即離開；其他成員可忽略不同 userId 的事件。
+        Map<String, Object> payload = Map.of(
+                "type", "CHAT_ACCESS_REVOKED",
+                "campaignId", campaignId,
+                "userId", userId,
+                "reason", reason
+        );
+        messagingTemplate.convertAndSend("/topic/campaigns/" + campaignId, payload);
+        messagingTemplate.convertAndSendToUser(userId.toString(), "/queue/chat-access", payload);
+        log.info("已撤銷使用者 {} 對聊天室 {} 的即時存取權", userId, campaignId);
+    }
+
 }

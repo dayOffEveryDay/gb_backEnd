@@ -4,6 +4,7 @@ import com.costco.gb.entity.Campaign;
 import com.costco.gb.entity.PurchaseRequest;
 import com.costco.gb.entity.Store;
 import com.costco.gb.entity.User;
+import com.costco.gb.dto.response.PurchaseRequestDeliveryDetailResponse;
 import com.costco.gb.repository.CampaignRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +18,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -33,6 +33,8 @@ class SharePageServiceTest {
     private CampaignRepository campaignRepository;
     @Mock
     private PurchaseRequestRepository purchaseRequestRepository;
+    @Mock
+    private PurchaseDeliveryService purchaseDeliveryService;
     @InjectMocks
     private SharePageService sharePageService;
 
@@ -96,18 +98,21 @@ class SharePageServiceTest {
                 .imageUrls(List.of("purchase-requests/20/coffee.jpg"))
                 .rewardType("FIXED")
                 .fixedRewardAmount(150)
-                .requesterCity("台中市")
-                .deliveryPublicSummary("台中市西區面交")
-                .deliveryPrivateDetail(Map.of("address", "私密地址 123 號"))
+                .deliveryMethod("FACE_TO_FACE")
                 .status("OPEN")
                 .build();
         when(purchaseRequestRepository.findById(20L)).thenReturn(Optional.of(request));
+        PurchaseRequestDeliveryDetailResponse detail = PurchaseRequestDeliveryDetailResponse.builder()
+                .city("台中市").district("西區").locationName("面交").build();
+        when(purchaseDeliveryService.read(request, false)).thenReturn(List.of(detail));
+        when(purchaseDeliveryService.publicSummary("FACE_TO_FACE", List.of(detail)))
+                .thenReturn("台中市西區 面交");
 
         String html = sharePageService.renderPurchaseRequestPage(20L);
 
         assertTrue(html.contains("https://api.example.com/uploads/purchase-requests/20/coffee.jpg"));
         assertTrue(html.contains("酬勞 NT$ 150"));
-        assertTrue(html.contains("台中市西區面交"));
+        assertTrue(html.contains("台中市西區 面交"));
         assertFalse(html.contains("私密地址 123 號"));
     }
 }

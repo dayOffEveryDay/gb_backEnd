@@ -42,14 +42,10 @@ public class UserService {
         if (request.getDisplayName() != null) {
             user.setDisplayName(request.getDisplayName());
         }
-        if (request.getHasCostcoMembership() != null) {
-            user.setHasCostcoMembership(request.getHasCostcoMembership());
-        }
-
         // 3. 儲存進資料庫 (其實有 @Transactional 的加持，Hibernate 的 Dirty Checking 也會自動幫你 UPDATE)
         userRepository.save(user);
 
-        log.info("User {} updated profile. hasCostcoMembership: {}", userId, request.getHasCostcoMembership());
+        log.info("User {} updated profile", userId);
     }
 
 //    @Transactional(readOnly = true)

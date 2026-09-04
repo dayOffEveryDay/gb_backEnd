@@ -60,7 +60,6 @@
 | `line_uid` | `VARCHAR(255)` | LINE UID，唯一 |
 | `display_name` | `VARCHAR(255)` | 顯示名稱 |
 | `profile_image_url` | `VARCHAR(512)` | 頭像網址 |
-| `has_costco_membership` | `BOOLEAN` | 是否具有 Costco 會員，預設 `FALSE` |
 | `credit_score` | `INT` | 信用分數，預設 `100` |
 | `no_show_count` | `INT` | 爽約次數，預設 `0` |
 | `total_hosted_count` | `INT` | 開團總次數，預設 `0` |
@@ -187,8 +186,13 @@
 
 `status` 可能值：
 - `JOINED`
-- `CANCELLED`
+- `CONFIRMED`
+- `DISPUTED`
 - `NO_SHOW`
+- `CANCELLED`
+- `KICKED`
+- `CANCELLED_BY_HOST`
+- `CANCELLED_BY_SYSTEM`
 
 限制：
 - `UNIQUE (campaign_id, user_id)`

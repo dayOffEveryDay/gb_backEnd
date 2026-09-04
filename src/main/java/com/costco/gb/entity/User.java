@@ -21,10 +21,6 @@ public class User extends BaseEntity {
     private String profileImageUrl;
 
     @Builder.Default
-    @Column(name = "has_costco_membership")
-    private Boolean hasCostcoMembership = false;
-
-    @Builder.Default
     private Integer creditScore = 100;
 
     @Builder.Default

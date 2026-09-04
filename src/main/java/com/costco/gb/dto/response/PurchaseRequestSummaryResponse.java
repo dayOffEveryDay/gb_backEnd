@@ -17,10 +17,10 @@ public class PurchaseRequestSummaryResponse {
     private List<String> imageUrls;
     private String rewardType;
     private Integer fixedRewardAmount;
-    private String requesterCity;
-    private String requesterDistrict;
     private String deliveryMethod;
+    // 由交付快照計算的公開摘要，不是 purchase_requests 資料庫欄位。
     private String deliveryPublicSummary;
+    private List<PurchaseRequestDeliveryDetailResponse> deliveryDetails;
     private LocalDateTime requestExpireTime;
     private Integer deliveryDeadlineHours;
     private Integer minCreditScore;

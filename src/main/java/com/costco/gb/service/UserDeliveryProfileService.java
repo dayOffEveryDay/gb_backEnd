@@ -4,9 +4,11 @@ import com.costco.gb.dto.request.UserDeliveryProfileRequest;
 import com.costco.gb.dto.response.UserDeliveryProfileResponse;
 import com.costco.gb.entity.User;
 import com.costco.gb.entity.UserDeliveryProfile;
+import com.costco.gb.repository.PurchaseRequestDeliveryDetailRepository;
 import com.costco.gb.repository.UserDeliveryProfileRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,16 +18,14 @@ import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class UserDeliveryProfileService {
 
     private static final Set<String> PROFILE_TYPES = Set.of(
-            "FACE_TO_FACE", "HOME_DELIVERY", "STORE_TO_STORE"
+            "FACE_TO_FACE", "HOME_DELIVERY", "STORE_TO_STORE", "IBOX"
     );
-    private static final Set<String> LOCATION_TYPES = Set.of(
-            "TRANSIT_RANGE", "LANDMARK", "ROAD", "DISTRICT", "ADDRESS", "STORE", "CUSTOM"
-    );
-
     private final UserDeliveryProfileRepository profileRepository;
+    private final PurchaseRequestDeliveryDetailRepository deliveryDetailRepository;
     private final UserRepository userRepository;
 
     @Transactional(readOnly = true)
@@ -50,7 +50,9 @@ public class UserDeliveryProfileService {
         UserDeliveryProfile profile = new UserDeliveryProfile();
         profile.setUser(user);
         applyRequest(profile, request);
-        return toResponse(profileRepository.save(profile));
+        UserDeliveryProfile saved = profileRepository.save(profile);
+        log.info("使用者 {} 已新增常用交付資料 {}，類型: {}", userId, saved.getId(), saved.getProfileType());
+        return toResponse(saved);
     }
 
     @Transactional
@@ -58,13 +60,18 @@ public class UserDeliveryProfileService {
         validateRequest(request);
         UserDeliveryProfile profile = getOwnedProfile(userId, profileId);
         applyRequest(profile, request);
-        return toResponse(profileRepository.save(profile));
+        UserDeliveryProfile saved = profileRepository.save(profile);
+        log.info("使用者 {} 已修改常用交付資料 {}，類型: {}", userId, profileId, saved.getProfileType());
+        return toResponse(saved);
     }
 
     @Transactional
     public void delete(Long userId, Long profileId) {
         UserDeliveryProfile profile = getOwnedProfile(userId, profileId);
+        // 保留託購快照內容，只清除來源追蹤關聯，行為與資料庫 ON DELETE SET NULL 一致。
+        deliveryDetailRepository.clearSourceProfile(profileId);
         profileRepository.delete(profile);
+        log.info("使用者 {} 已刪除常用交付資料 {}，類型: {}", userId, profileId, profile.getProfileType());
     }
 
     private UserDeliveryProfile getOwnedProfile(Long userId, Long profileId) {
@@ -78,14 +85,7 @@ public class UserDeliveryProfileService {
 
     private void validateRequest(UserDeliveryProfileRequest request) {
         String profileType = normalizeRequired(request.getProfileType(), "交付資料類型不可空白");
-        String locationType = normalizeRequired(request.getLocationType(), "地點類型不可空白");
         validateProfileType(profileType);
-        if (!LOCATION_TYPES.contains(locationType)) {
-            throw new RuntimeException("不支援的地點類型: " + locationType);
-        }
-        if (request.getDisplayText() == null || request.getDisplayText().isBlank()) {
-            throw new RuntimeException("顯示文字不可空白");
-        }
     }
 
     private void validateProfileType(String profileType) {
@@ -96,15 +96,15 @@ public class UserDeliveryProfileService {
 
     private void applyRequest(UserDeliveryProfile profile, UserDeliveryProfileRequest request) {
         profile.setProfileType(normalizeRequired(request.getProfileType(), "交付資料類型不可空白"));
-        profile.setLocationType(normalizeRequired(request.getLocationType(), "地點類型不可空白"));
         profile.setLabel(request.getLabel());
         profile.setCity(request.getCity());
         profile.setDistrict(request.getDistrict());
         profile.setLocationName(request.getLocationName());
-        profile.setRangeStart(request.getRangeStart());
-        profile.setRangeEnd(request.getRangeEnd());
-        profile.setDisplayText(request.getDisplayText().trim());
-        profile.setDetail(request.getDetail());
+        profile.setLocationCode(request.getLocationCode());
+        profile.setProvider(request.getProvider());
+        profile.setAddress(request.getAddress());
+        profile.setRecipientName(request.getRecipientName());
+        profile.setRecipientPhone(request.getRecipientPhone());
         profile.setIsDefault(Boolean.TRUE.equals(request.getIsDefault()));
     }
 
@@ -112,15 +112,15 @@ public class UserDeliveryProfileService {
         return UserDeliveryProfileResponse.builder()
                 .id(profile.getId())
                 .profileType(profile.getProfileType())
-                .locationType(profile.getLocationType())
                 .label(profile.getLabel())
                 .city(profile.getCity())
                 .district(profile.getDistrict())
                 .locationName(profile.getLocationName())
-                .rangeStart(profile.getRangeStart())
-                .rangeEnd(profile.getRangeEnd())
-                .displayText(profile.getDisplayText())
-                .detail(profile.getDetail())
+                .locationCode(profile.getLocationCode())
+                .provider(profile.getProvider())
+                .address(profile.getAddress())
+                .recipientName(profile.getRecipientName())
+                .recipientPhone(profile.getRecipientPhone())
                 .isDefault(profile.getIsDefault())
                 .createdAt(profile.getCreatedAt())
                 .updatedAt(profile.getUpdatedAt())

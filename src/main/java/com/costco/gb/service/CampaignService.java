@@ -44,6 +44,7 @@ public class CampaignService {
     private final NotificationService notificationService;
     private final CampaignMapper campaignMapper;
     private final CreditScoreService creditScoreService;
+    private final CampaignChatAccessService campaignChatAccessService;
 
 
     // 圖片完整網址使用的服務基底 URL
@@ -70,14 +71,11 @@ public class CampaignService {
     @Transactional
     public void createCampaign(Long hostId, CreateCampaignRequest request) {
 
-        // 1. 驗證團主身分與開團權限
+        // 1. 驗證團主身分
         User host = userRepository.findById(hostId)
                 .orElseThrow(() -> new RuntimeException("找不到使用者"));
         // 🧠 系統自動計算團主自留數量
         int calculatedReserved = request.getProductTotalQuantity() - request.getOpenQuantity();
-        if (!host.getHasCostcoMembership()) {
-            throw new RuntimeException("拒絕存取：必須擁有好市多會員卡才能發起合購！");
-        }
         // 🛡️ 防呆：開放的數量不能大於商品總數！
         if (request.getOpenQuantity() > request.getProductTotalQuantity()) {
             throw new IllegalArgumentException("開放合購的數量不能大於商品總數！");
@@ -483,6 +481,7 @@ public class CampaignService {
         // 4. 🔔 通知被踢的人與聊天室
         notificationService.sendNotification(participant.getUser(), "KICKED", campaignId,
                 "您已被團主移出合購單「" + campaign.getItemName() + "」。");
+        notificationService.broadcastChatAccessRevoked(campaignId, targetUserId, "KICKED");
 
         log.info("團主 {} 踢除了團員 {}，釋出 {} 份，合購單 {} 退回 OPEN 狀態", hostId, targetUserId, freedQuantity, campaignId);
     }
@@ -599,6 +598,7 @@ public class CampaignService {
         // 通知團主有參與者退出
          notificationService.sendNotification(campaign.getHost(), "MEMBER_WITHDRAW", campaignId,
             "😢 團員已退出您的合購單「" + campaign.getItemName() + "」，目前已恢復招募狀態。");
+        notificationService.broadcastChatAccessRevoked(campaignId, userId, "WITHDRAWN");
 
     }
 
@@ -676,6 +676,7 @@ public class CampaignService {
             campaignRepository.save(campaign);
             log.info("🎉 合購單 {} 的所有團員皆已確認收貨，訂單正式 COMPLETED！", campaignId);
             notificationService.notifyReviewTime(campaign);
+            notificationService.broadcastCampaignStatus(campaignId, "COMPLETED", "團購已完成，聊天室將保留 3 天");
         }
     }
     // ==========================================
@@ -709,6 +710,8 @@ public class CampaignService {
             creditScoreLogRepository.save(csLog);
             // 4. 🕊️ 真正釋放團員的地方！直接呼叫 Repository 的批次更新方法
             int releasedCount = participantRepository.cancelAllByCampaignId(campaign.getId());
+            notificationService.broadcastCampaignStatus(
+                    campaign.getId(), "HOST_NO_SHOW", "團購已由系統結束，聊天室改為唯讀");
 
             log.warn("🚨 抓到幽靈團主！合購單 {} 強制結案。團主信用扣 10 分。共釋放了 {} 名無辜團員！",
                     campaign.getId(), releasedCount);
@@ -755,7 +758,7 @@ public class CampaignService {
             userRepository.save(host);
 
             for (Participant p : activeParticipants) {
-                p.setStatus("CANCELLED");
+                p.setStatus("CANCELLED_BY_HOST");
             }
             participantRepository.saveAll(activeParticipants);
 
@@ -771,6 +774,7 @@ public class CampaignService {
         campaign.setAvailableQuantity(campaign.getTotalQuantity());
 
         campaignRepository.save(campaign);
+        notificationService.broadcastCampaignStatus(campaignId, "CANCELLED", "團購已由團主取消，聊天室改為唯讀");
         log.info("合購單 {} 已成功被團主 {} 取消。", campaignId, hostId);
     }
 
@@ -782,12 +786,14 @@ public class CampaignService {
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
 
         boolean isHost = campaign.getHost().getId().equals(userId);
+        String chatAccess = campaignChatAccessService.getAccessLevel(campaign, userId).name();
 
         if (isHost) {
             return MyParticipationResponse.builder()
                     .isHost(true)
                     .isJoined(true)
                     .quantity(campaign.getHostReservedQuantity())
+                    .chatAccess(chatAccess)
                     .build();
         }
 
@@ -797,11 +803,13 @@ public class CampaignService {
                         .isHost(false)
                         .isJoined(true) // 確定有 JOINED 紀錄才算已參加
                         .quantity(participant.getQuantity())
+                        .chatAccess(chatAccess)
                         .build())
                 .orElseGet(() -> MyParticipationResponse.builder()
                         .isHost(false)
                         .isJoined(false) // 如果被 CANCELLED 了，這裡就會找不到，變成未參加！
                         .quantity(0)
+                        .chatAccess(chatAccess)
                         .build());
     }
 

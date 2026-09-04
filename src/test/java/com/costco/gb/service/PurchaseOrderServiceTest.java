@@ -14,7 +14,6 @@ import com.costco.gb.repository.PurchaseOrderEventRepository;
 import com.costco.gb.repository.PurchaseChatRoomRepository;
 import com.costco.gb.repository.PurchaseOrderRepository;
 import com.costco.gb.repository.PurchaseQuoteRepository;
-import com.costco.gb.repository.PurchaseRequestMeetupRangeRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +46,7 @@ class PurchaseOrderServiceTest {
     @Mock
     private PurchaseRequestRepository purchaseRequestRepository;
     @Mock
-    private PurchaseRequestMeetupRangeRepository meetupRangeRepository;
+    private PurchaseDeliveryService purchaseDeliveryService;
     @Mock
     private PurchaseQuoteRepository quoteRepository;
     @Mock
@@ -75,9 +74,7 @@ class PurchaseOrderServiceTest {
                 .imageUrls(List.of("item.jpg"))
                 .rewardType("FIXED")
                 .fixedRewardAmount(100)
-                .requesterCity("台北市")
                 .deliveryMethod("FACE_TO_FACE")
-                .deliveryPublicSummary("台北車站")
                 .requestExpireTime(LocalDateTime.now().plusDays(3))
                 .deliveryDeadlineHours(72)
                 .minCreditScore(0)
@@ -147,7 +144,7 @@ class PurchaseOrderServiceTest {
     }
 
     @Test
-    @DisplayName("回報缺貨不扣分且原得標報價應失效")
+    @DisplayName("固定價訂單回報缺貨後應等待委託人決定是否重開")
     void unavailableCancelsSelectedQuoteWithoutPenalty() {
         PurchaseQuote selectedQuote = PurchaseQuote.builder()
                 .id(20L)
@@ -168,7 +165,8 @@ class PurchaseOrderServiceTest {
         assertEquals("UNAVAILABLE_CANCELLED", response.getStatus());
         assertEquals(0, response.getCreditPenalty());
         assertEquals("UNAVAILABLE_CANCELLED", selectedQuote.getStatus());
-        assertEquals("OPEN", purchaseRequest.getStatus());
+        assertEquals("AWAITING_REOPEN", purchaseRequest.getStatus());
+        assertEquals(0, purchaseRequest.getReopenCount());
         verify(quoteRepository).save(selectedQuote);
     }
 

@@ -21,6 +21,7 @@ public class SharePageService {
 
     private final CampaignRepository campaignRepository;
     private final PurchaseRequestRepository purchaseRequestRepository;
+    private final PurchaseDeliveryService purchaseDeliveryService;
 
     @Value("${app.base-url:http://localhost:8080}")
     private String backendBaseUrl;
@@ -80,12 +81,12 @@ public class SharePageService {
         PurchaseRequest request = purchaseRequestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("找不到該託購需求"));
 
-        // 託購分享頁刻意使用公開交付摘要，不讀取 deliveryPrivateDetail 內的地址與聯絡資料。
+        // 託購分享頁只從公開版交付快照產生摘要，不揭露地址、收件人與聯絡資料。
         String imageUrl = firstPurchaseRequestImageUrl(request.getImageUrls());
         String reward = rewardLabel(request);
         String requesterName = request.getRequester().getDisplayName();
-        String location = fallback(request.getDeliveryPublicSummary(),
-                fallback(request.getRequesterCity(), "交付地點請見詳情"));
+        var deliveryDetails = purchaseDeliveryService.read(request, false);
+        String location = purchaseDeliveryService.publicSummary(request.getDeliveryMethod(), deliveryDetails);
         String description = reward + "・委託人 " + requesterName + "・" + location;
 
         SharePageData data = new SharePageData(

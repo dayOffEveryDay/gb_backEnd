@@ -2,76 +2,61 @@ package com.costco.gb.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
-import java.util.Map;
-
-/**
- * 使用者常用交付資料。
- * 保存面交、宅配或店到店的常用地點，供建立託購委託時選用。
- */
+/** 使用者常用交付資料，選用後會複製成託購單自己的快照。 */
 @Entity
-@Table(
-        name = "user_delivery_profiles",
-        indexes = {
-                @Index(name = "idx_user_delivery_profiles_user_type", columnList = "user_id, profile_type"),
-                @Index(name = "idx_user_delivery_profiles_city_type", columnList = "city, location_type")
-        }
-)
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Table(name = "user_delivery_profiles", indexes = {
+        @Index(name = "idx_user_delivery_profiles_user_type", columnList = "user_id, profile_type"),
+        @Index(name = "idx_user_delivery_profiles_area", columnList = "city, district"),
+        @Index(name = "idx_user_delivery_profiles_provider_location", columnList = "provider, location_code")
+})
+@AttributeOverrides({
+        @AttributeOverride(name = "createdAt", column = @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "datetime")),
+        @AttributeOverride(name = "updatedAt", column = @Column(name = "updated_at", nullable = false, columnDefinition = "datetime"))
+})
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class UserDeliveryProfile extends BaseEntity {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 此交付資料所屬的使用者。
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "user_id", nullable = false,
+            foreignKey = @ForeignKey(name = "fk_user_delivery_profiles_user"))
     private User user;
 
-    // 交付方式，例如 FACE_TO_FACE、HOME_DELIVERY 或 STORE_TO_STORE。
+    // FACE_TO_FACE、STORE_TO_STORE、HOME_DELIVERY、IBOX。
     @Column(name = "profile_type", nullable = false, length = 30)
     private String profileType;
 
-    // 地點資料類型，例如 TRANSIT_RANGE、LANDMARK、ADDRESS 或 STORE。
-    @Column(name = "location_type", length = 30)
-    private String locationType;
-
-    // 使用者自訂辨識名稱，例如「家裡」或「公司」。
     @Column(length = 100)
     private String label;
 
-    @Column(length = 50)
+    @Column(name = "city", length = 50)
     private String city;
 
-    @Column(length = 50)
+    @Column(name = "district", length = 50)
     private String district;
 
-    @Column(name = "location_name", length = 100)
+    @Column(name = "location_name", length = 255)
     private String locationName;
 
-    @Column(name = "range_start", length = 100)
-    private String rangeStart;
+    @Column(name = "location_code", length = 100)
+    private String locationCode;
 
-    @Column(name = "range_end", length = 100)
-    private String rangeEnd;
+    @Column(name = "provider", length = 50)
+    private String provider;
 
-    // 可直接提供前端顯示的交付地點摘要。
-    @Column(name = "display_text", nullable = false, length = 255)
-    private String displayText;
+    @Column(name = "address", length = 255)
+    private String address;
 
-    // 保存不同地點類型的完整結構化資料。
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "json")
-    private Map<String, Object> detail;
+    @Column(name = "recipient_name", length = 100)
+    private String recipientName;
+
+    @Column(name = "recipient_phone", length = 30)
+    private String recipientPhone;
 
     @Builder.Default
-    @Column(name = "is_default")
+    @Column(name = "is_default", nullable = false)
     private Boolean isDefault = false;
 }

@@ -8,7 +8,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 託購需求主檔。
@@ -20,11 +19,14 @@ import java.util.Map;
         indexes = {
                 @Index(name = "idx_purchase_requests_status_expire", columnList = "status, request_expire_time"),
                 @Index(name = "idx_purchase_requests_requester_status", columnList = "requester_id, status"),
-                @Index(name = "idx_purchase_requests_city_status", columnList = "requester_city, status"),
                 @Index(name = "idx_purchase_requests_reward_status", columnList = "reward_type, status"),
                 @Index(name = "idx_purchase_requests_delivery_status", columnList = "delivery_method, status")
         }
 )
+@AttributeOverrides({
+        @AttributeOverride(name = "createdAt", column = @Column(name = "created_at", nullable = false, updatable = false, columnDefinition = "datetime")),
+        @AttributeOverride(name = "updatedAt", column = @Column(name = "updated_at", nullable = false, columnDefinition = "datetime"))
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -62,24 +64,9 @@ public class PurchaseRequest extends BaseEntity {
     @Column(name = "fixed_reward_amount")
     private Integer fixedRewardAmount;
 
-    @Column(name = "requester_city", nullable = false, length = 50)
-    private String requesterCity;
-
-    @Column(name = "requester_district", length = 50)
-    private String requesterDistrict;
-
-    // 交付方式：FACE_TO_FACE、HOME_DELIVERY 或 STORE_TO_STORE。
+    // 此交付方式套用於該託購單全部快照，支援 IBOX。
     @Column(name = "delivery_method", nullable = false, length = 30)
     private String deliveryMethod;
-
-    // 公開交付摘要，列表與詳情頁可直接顯示，不包含敏感地址。
-    @Column(name = "delivery_public_summary", nullable = false, length = 255)
-    private String deliveryPublicSummary;
-
-    // 私密交付資訊，只有成立訂單後的相關雙方可查看。
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "delivery_private_detail", columnDefinition = "json")
-    private Map<String, Object> deliveryPrivateDetail;
 
     // 託購需求截止時間；排程會依此將未成立需求轉為過期。
     @Column(name = "request_expire_time", nullable = false)
@@ -90,7 +77,7 @@ public class PurchaseRequest extends BaseEntity {
     private Integer deliveryDeadlineHours;
 
     @Builder.Default
-    @Column(name = "min_credit_score")
+    @Column(name = "min_credit_score", nullable = false)
     private Integer minCreditScore = 0;
 
     @Builder.Default
@@ -98,7 +85,7 @@ public class PurchaseRequest extends BaseEntity {
     private String status = "OPEN";
 
     @Builder.Default
-    @Column(name = "reopen_count")
+    @Column(name = "reopen_count", nullable = false)
     private Integer reopenCount = 0;
 
     @Column(name = "last_reopen_reason", length = 100)

@@ -12,9 +12,9 @@
 ### 團主取消合購
 
 - `cancelCampaignByHost(...)` 目前會取消合購單本體。
-- 若該合購已有 active `JOINED` 團員，會把團員狀態改為 `CANCELLED`。
+- 若該合購已有 active `JOINED` 團員，會把團員狀態改為 `CANCELLED_BY_HOST`，保留唯讀聊天紀錄。
 - 若該合購已有 active `JOINED` 團員，會呼叫 `CreditScoreService.recordScoreChange(...)` 寫入信用分紀錄。
-- 目前程式傳入的 `scoreChange` 是 `10`。若產品規格是取消要扣分，這裡應改成 `-10`。
+- 目前程式傳入的 `scoreChange` 是 `-10`。
 
 ### 評價功能
 
@@ -34,7 +34,8 @@
 - `confirmReceipt(...)` 會在合購變成 `COMPLETED` 後觸發 `notificationService.notifyReviewTime(campaign)`。
 - 團主宣告已面交 `deliverCampaign(...)` 會廣播 `CAMPAIGN_STATUS_CHANGED` 給聊天室訂閱者。
 - `ChatRoomInterceptor` 已接到 STOMP inbound channel，聊天室訂閱會檢查使用者是否為團主或有效參與者。
-- `COMPLETED` 合購的聊天室會在 `completedAt` 後保留 3 天可訂閱權限。
+- `COMPLETED` 合購的聊天室會在 `completedAt` 後保留 3 天可讀寫，期限屆滿後改為唯讀。
+- 主動退出或被踢除者會失去聊天室權限；整團取消時，原有效成員保留唯讀紀錄。
 
 本文件整理目前專案 `gb_backEnd` 主要 service / WebSocket / 新增功能邏輯，內容以 `src/main/java/com/costco/gb` 實際程式碼為準，並補上這次工作區尚未提交的聊天與通知功能。
 
@@ -86,7 +87,7 @@
 
 - 功能: 建立合購
 - 核心規則:
-  - 團主必須存在且 `hasCostcoMembership = true`
+  - 團主必須存在
   - `storeId`、`categoryId` 必須對應到有效資料
   - `images` 最多 3 張
   - 圖片存放目錄為 `uploads/campaigns/`
@@ -214,8 +215,8 @@
 - 輸出: `ChatMessageResponse`
 - 核心規則:
   - 合購單與發送者必須存在
-  - 發送者需是團主，或存在 `Participant`
-  - 非團主且非團員時，丟出 `RuntimeException("您不是此合購單的成員，無法發言！")`
+  - 發送者必須具備 `READ_WRITE` 權限
+  - 主動退出、被踢、整團取消或封存後都不可發言
   - 目前訊息類型固定寫入 `messageType = "TEXT"`
 - 回傳欄位:
   - `senderId`
@@ -228,8 +229,8 @@
 - 功能: 查詢聊天室歷史訊息
 - 輸出: `List<ChatMessageResponse>`
 - 核心規則:
-  - 使用者需是團主或參與者
-  - 若不是團員，會記錄 warning log
+  - 使用者必須具備 `READ_WRITE` 或 `READ_ONLY` 權限
+  - 主動退出或被踢除者不可讀取歷史訊息
   - 透過 `chatMessageRepository.findByCampaignIdOrderByCreatedAtAsc(campaignId)` 依時間正序查詢
 
 ---
@@ -375,7 +376,7 @@
 - 功能: 更新個人資料
 - 核心規則:
   - 先查使用者是否存在
-  - `displayName`、`hasCostcoMembership` 有傳才更新
+  - `displayName` 有傳才更新
 
 ### 9.2 `getMyCreditLogs(Long userId, Pageable pageable)`
 

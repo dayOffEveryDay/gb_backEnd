@@ -2,6 +2,7 @@ package com.costco.gb.service;
 
 import com.costco.gb.dto.request.PurchaseQuoteRequest;
 import com.costco.gb.dto.response.PurchaseOrderResponse;
+import com.costco.gb.dto.response.PurchaseQuoteResponse;
 import com.costco.gb.entity.PurchaseOrder;
 import com.costco.gb.entity.PurchaseQuote;
 import com.costco.gb.entity.PurchaseRequest;
@@ -19,6 +20,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -62,6 +66,34 @@ class PurchaseQuoteServiceTest {
     void setUp() {
         requester = User.builder().id(1L).displayName("委託人").creditScore(100).build();
         runner = User.builder().id(2L).displayName("接單人").creditScore(100).build();
+        ReflectionTestUtils.setField(purchaseQuoteService, "baseUrl", "https://api.example.com/");
+    }
+
+    @Test
+    @DisplayName("取得我的報價時應回傳可直接載入的完整商品圖片網址")
+    void getMyQuotesReturnsPublicItemImageUrls() {
+        PurchaseRequest purchaseRequest = quoteRequest("QUOTING");
+        purchaseRequest.setImageUrls(List.of(
+                "general/item.jpg",
+                "https://cdn.example.com/item.jpg"
+        ));
+        PurchaseQuote quote = PurchaseQuote.builder()
+                .id(20L)
+                .purchaseRequest(purchaseRequest)
+                .quoter(runner)
+                .quoteAmount(150)
+                .status("ACTIVE")
+                .build();
+        when(quoteRepository.findByQuoterIdOrderByCreatedAtDesc(any(), any()))
+                .thenReturn(new PageImpl<>(List.of(quote)));
+
+        Page<PurchaseQuoteResponse> response = purchaseQuoteService.getMyQuotes(2L, 0, 20);
+
+        assertEquals(List.of(
+                "https://api.example.com/uploads/general/item.jpg",
+                "https://cdn.example.com/item.jpg"
+        ), response.getContent().get(0).getItemImageUrls());
+        assertEquals("委託人", response.getContent().get(0).getRequesterDisplayName());
     }
 
     @Test
@@ -230,9 +262,7 @@ class PurchaseQuoteServiceTest {
                 .requester(requester)
                 .itemName("指定商品")
                 .rewardType("QUOTE")
-                .requesterCity("台北市")
                 .deliveryMethod("FACE_TO_FACE")
-                .deliveryPublicSummary("台北車站")
                 .requestExpireTime(LocalDateTime.now().plusDays(3))
                 .deliveryDeadlineHours(72)
                 .minCreditScore(80)

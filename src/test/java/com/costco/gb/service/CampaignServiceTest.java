@@ -1,12 +1,15 @@
 package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreateCampaignRequest;
+import com.costco.gb.dto.request.JoinCampaignRequest;
 import com.costco.gb.entity.Category;
 import com.costco.gb.entity.Campaign;
+import com.costco.gb.entity.Participant;
 import com.costco.gb.entity.Store;
 import com.costco.gb.entity.User;
 import com.costco.gb.repository.CampaignRepository;
 import com.costco.gb.repository.CategoryRepository;
+import com.costco.gb.repository.ParticipantRepository;
 import com.costco.gb.repository.StoreRepository;
 import com.costco.gb.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -36,6 +40,14 @@ class CampaignServiceTest {
     private CategoryRepository categoryRepository;
     @Mock
     private CampaignRepository campaignRepository;
+    @Mock
+    private ParticipantRepository participantRepository;
+    @Mock
+    private NotificationService notificationService;
+    @Mock
+    private CreditScoreService creditScoreService;
+    @Mock
+    private CampaignChatAccessService campaignChatAccessService;
 
     @InjectMocks
     private CampaignService campaignService; // 會自動把上面 @Mock 的物件注入進來
@@ -48,7 +60,7 @@ class CampaignServiceTest {
     @BeforeEach
     void setUp() {
         // 每次執行測試前，先準備好假資料
-        validHost = User.builder().id(1L).displayName("Howard 輝").hasCostcoMembership(true).build();
+        validHost = User.builder().id(1L).displayName("Howard 輝").build();
         validStore = Store.builder().id(1).name("中和店").build();
         validCategory = Category.builder().id(1).name("生鮮").build();
 
@@ -90,25 +102,6 @@ class CampaignServiceTest {
     }
 
     @Test
-    @DisplayName("❌ 測試權限阻擋：沒有好市多會員卡應拋出例外")
-    void createCampaign_Fail_NoMembership() {
-        // Arrange: 把會員的卡片權限拔掉
-        validHost.setHasCostcoMembership(false);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(validHost));
-
-        // Act & Assert: 預期執行這個方法時，會拋出 RuntimeException
-        RuntimeException exception = assertThrows(RuntimeException.class, () -> {
-            campaignService.createCampaign(1L, validRequest);
-        });
-
-        // 驗證錯誤訊息是否如我們設計的
-        assertEquals("拒絕存取：必須擁有好市多會員卡才能發起合購！", exception.getMessage());
-
-        // 驗證存檔動作「絕對不能」被執行
-        verify(campaignRepository, never()).save(any(Campaign.class));
-    }
-
-    @Test
     @DisplayName("❌ 測試防呆：找不到指定門市應拋出例外")
     void createCampaign_Fail_StoreNotFound() {
         // Arrange: 模擬有會員，但門市 ID 亂填，資料庫找不到
@@ -122,5 +115,144 @@ class CampaignServiceTest {
 
         assertEquals("找不到指定的門市", exception.getMessage());
         verify(campaignRepository, never()).save(any(Campaign.class));
+    }
+
+    @Test
+    @DisplayName("加入最後名額後應滿單並通知")
+    void joinCampaign_LastAvailableQuantity_MarksCampaignFull() {
+        Campaign campaign = campaign(2, "OPEN");
+        User participantUser = User.builder().id(2L).totalJoinedCount(0).build();
+        JoinCampaignRequest request = new JoinCampaignRequest();
+        request.setQuantity(2);
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+        when(campaignRepository.decrementQuantity(10L, 2)).thenReturn(1);
+        when(participantRepository.findByCampaignIdAndUserId(10L, 2L)).thenReturn(Optional.empty());
+        when(userRepository.findById(2L)).thenReturn(Optional.of(participantUser));
+
+        campaignService.joinCampaign(2L, 10L, request);
+
+        ArgumentCaptor<Participant> participantCaptor = ArgumentCaptor.forClass(Participant.class);
+        verify(participantRepository).save(participantCaptor.capture());
+        assertEquals("JOINED", participantCaptor.getValue().getStatus());
+        assertEquals(2, participantCaptor.getValue().getQuantity());
+        assertEquals("FULL", campaign.getStatus());
+        assertEquals(0, campaign.getAvailableQuantity());
+        assertEquals(1, participantUser.getTotalJoinedCount());
+        verify(notificationService).notifyCampaignFull(campaign);
+    }
+
+    @Test
+    @DisplayName("庫存原子扣除失敗時不得建立參與紀錄")
+    void joinCampaign_InsufficientQuantity_DoesNotCreateParticipant() {
+        Campaign campaign = campaign(1, "OPEN");
+        JoinCampaignRequest request = new JoinCampaignRequest();
+        request.setQuantity(2);
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+        when(campaignRepository.decrementQuantity(10L, 2)).thenReturn(0);
+
+        RuntimeException exception = assertThrows(RuntimeException.class,
+                () -> campaignService.joinCampaign(2L, 10L, request));
+
+        assertEquals("剩餘數量不足。請確認認購數量或是是否已滿團。", exception.getMessage());
+        assertEquals(1, campaign.getAvailableQuantity());
+        verify(participantRepository, never()).save(any());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("團員退出應釋放名額、恢復招募並記錄取消次數")
+    void withdrawCampaign_JoinedParticipant_ReopensCampaignAndNotifiesHost() {
+        Campaign campaign = campaign(0, "FULL");
+        campaign.setAllowRevision(true);
+        User participantUser = User.builder().id(2L).participantCancelCount(null).build();
+        Participant participant = Participant.builder().user(participantUser).campaign(campaign)
+                .quantity(2).status("JOINED").build();
+        when(participantRepository.findByCampaignIdAndUserIdAndStatus(10L, 2L, "JOINED"))
+                .thenReturn(Optional.of(participant));
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(participantUser));
+
+        campaignService.withdrawCampaign(2L, 10L);
+
+        assertEquals("CANCELLED", participant.getStatus());
+        assertEquals("OPEN", campaign.getStatus());
+        assertFalse(campaign.isAllowRevision());
+        assertEquals(2, campaign.getAvailableQuantity());
+        assertEquals(1, participantUser.getParticipantCancelCount());
+        verify(notificationService).sendNotification(campaign.getHost(), "MEMBER_WITHDRAW", 10L,
+                "😢 團員已退出您的合購單「測試商品」，目前已恢復招募狀態。");
+        verify(notificationService).broadcastChatAccessRevoked(10L, 2L, "WITHDRAWN");
+    }
+
+    @Test
+    @DisplayName("團主在有有效團員時可宣告面交並廣播")
+    void deliverCampaign_HostWithJoinedParticipants_MarksDeliveredAndBroadcasts() {
+        Campaign campaign = campaign(1, "OPEN");
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+        when(participantRepository.countByCampaignIdAndStatus(10L, "JOINED")).thenReturn(1L);
+
+        campaignService.deliverCampaign(1L, 10L);
+
+        assertEquals("DELIVERED", campaign.getStatus());
+        verify(campaignRepository).save(campaign);
+        verify(notificationService).broadcastCampaignStatus(10L, "DELIVERED", "主揪已發起面交");
+    }
+
+    @Test
+    @DisplayName("最後一位團員確認收貨時應完成合購並開放評價")
+    void confirmReceipt_LastJoinedParticipant_CompletesCampaignAndNotifiesReview() {
+        Campaign campaign = campaign(0, "DELIVERED");
+        Participant participant = Participant.builder().campaign(campaign)
+                .user(User.builder().id(2L).build()).quantity(1).status("JOINED").build();
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+        when(participantRepository.findByCampaignIdAndUserId(10L, 2L)).thenReturn(Optional.of(participant));
+        when(participantRepository.countByCampaignIdAndStatus(10L, "JOINED")).thenReturn(0L);
+
+        campaignService.confirmReceipt(2L, 10L);
+
+        assertEquals("CONFIRMED", participant.getStatus());
+        assertEquals("COMPLETED", campaign.getStatus());
+        assertNotNull(campaign.getCompletedAt());
+        verify(campaignRepository).save(campaign);
+        verify(notificationService).notifyReviewTime(campaign);
+        verify(notificationService).broadcastCampaignStatus(
+                10L, "COMPLETED", "團購已完成，聊天室將保留 3 天");
+    }
+
+    @Test
+    @DisplayName("團主取消已有團員的合購應取消全員並扣除信用分")
+    void cancelCampaignByHost_WithJoinedParticipants_CancelsParticipantsAndPenalizesHost() {
+        Campaign campaign = campaign(2, "OPEN");
+        User joinedUser = User.builder().id(2L).build();
+        Participant participant = Participant.builder().campaign(campaign).user(joinedUser)
+                .quantity(1).status("JOINED").build();
+        when(campaignRepository.findById(10L)).thenReturn(Optional.of(campaign));
+        when(participantRepository.findByCampaignIdAndStatus(10L, "JOINED")).thenReturn(List.of(participant));
+
+        campaignService.cancelCampaignByHost(1L, 10L);
+
+        assertEquals("CANCELLED", campaign.getStatus());
+        assertEquals(2, campaign.getAvailableQuantity());
+        assertEquals(campaign.getHost(), campaign.getBlameUser());
+        assertEquals("CANCELLED_BY_HOST", participant.getStatus());
+        assertEquals(1, campaign.getHost().getHostCancelCount());
+        verify(creditScoreService).recordScoreChange(1L, -10,
+                "取消已有團員的合購單：「測試商品」", 10L);
+        verify(participantRepository).saveAll(List.of(participant));
+        verify(notificationService).notifyCampaignCancelled(campaign, List.of(participant));
+        verify(notificationService).broadcastCampaignStatus(
+                10L, "CANCELLED", "團購已由團主取消，聊天室改為唯讀");
+    }
+
+    private Campaign campaign(int availableQuantity, String status) {
+        return Campaign.builder()
+                .id(10L)
+                .host(User.builder().id(1L).hostCancelCount(0).build())
+                .itemName("測試商品")
+                .totalQuantity(2)
+                .availableQuantity(availableQuantity)
+                .expireTime(LocalDateTime.now().plusHours(1))
+                .status(status)
+                .build();
     }
 }

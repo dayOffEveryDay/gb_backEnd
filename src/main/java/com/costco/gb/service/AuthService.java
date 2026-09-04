@@ -74,7 +74,6 @@ public class AuthService {
                     .lineUid(lineUid)
                     .displayName(displayName)
                     .profileImageUrl(pictureUrl)
-                    .hasCostcoMembership(false) // 預設尚未綁定 Costco 會員
                     .build();
             user = userRepository.save(user);
 
@@ -102,7 +101,6 @@ public class AuthService {
                         .id(user.getId())
                         .displayName(user.getDisplayName())
                         .profileImageUrl(user.getProfileImageUrl())
-                        .hasCostcoMembership(user.getHasCostcoMembership())
                         .build())
                 .build();
     }

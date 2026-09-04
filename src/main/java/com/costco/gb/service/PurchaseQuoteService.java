@@ -15,6 +15,7 @@ import com.costco.gb.repository.PurchaseQuoteRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -41,6 +43,9 @@ public class PurchaseQuoteService {
     private final BlockRepository blockRepository;
     private final NotificationService notificationService;
     private final PurchaseChatService purchaseChatService;
+
+    @Value("${app.base-url:http://localhost:8080}")
+    private String baseUrl;
 
     @Transactional
     public PurchaseQuoteResponse createQuote(Long userId, Long requestId, PurchaseQuoteRequest request) {
@@ -331,6 +336,8 @@ public class PurchaseQuoteService {
                 .id(quote.getId())
                 .purchaseRequestId(quote.getPurchaseRequest().getId())
                 .itemName(quote.getPurchaseRequest().getItemName())
+                .itemImageUrls(toPublicImageUrls(quote.getPurchaseRequest().getImageUrls()))
+                .requesterDisplayName(quote.getPurchaseRequest().getRequester().getDisplayName())
                 .quoterId(quote.getQuoter().getId())
                 .quoterDisplayName(quote.getQuoter().getDisplayName())
                 .quoterProfileImageUrl(quote.getQuoter().getProfileImageUrl())
@@ -343,6 +350,38 @@ public class PurchaseQuoteService {
                 .createdAt(quote.getCreatedAt())
                 .updatedAt(quote.getUpdatedAt())
                 .build();
+    }
+
+    // 託購圖片在資料庫僅保存相對 key，API 回應需補成前端可直接載入的完整網址。
+    private List<String> toPublicImageUrls(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        String normalizedBaseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
+        return values.stream()
+                .map(value -> toPublicImageUrl(value, normalizedBaseUrl))
+                .toList();
+    }
+
+    private String toPublicImageUrl(String value, String normalizedBaseUrl) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        if (trimmed.startsWith("general/") || trimmed.startsWith("purchase-requests/")
+                || trimmed.startsWith("campaigns/")) {
+            return normalizedBaseUrl + "/uploads/" + trimmed;
+        }
+        if (trimmed.startsWith("/uploads/") || trimmed.startsWith("/images/")) {
+            return normalizedBaseUrl + trimmed;
+        }
+        if (trimmed.startsWith("uploads/") || trimmed.startsWith("images/")) {
+            return normalizedBaseUrl + "/" + trimmed;
+        }
+        return trimmed;
     }
 
     private PurchaseOrderResponse toOrderResponse(PurchaseOrder order) {

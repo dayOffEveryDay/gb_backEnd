@@ -21,6 +21,7 @@ import java.util.UUID;
 public class FileService {
 
     private static final String BASE_UPLOAD_DIR = "uploads/campaigns/";
+    private static final String INQUIRY_UPLOAD_DIR = "uploads/inquiries/";
 
     private final String baseUrl;
 
@@ -75,6 +76,52 @@ public class FileService {
         } catch (IOException e) {
             log.error("聊天室檔案上傳失敗，campaignId: {}", campaignId, e);
             throw new RuntimeException("檔案上傳失敗，請稍後再試");
+        }
+    }
+
+    // 詢問附圖限制為三張有效圖片，避免非圖片檔案與過多檔案寫入公開目錄。
+    public List<String> uploadInquiryImages(List<MultipartFile> files) {
+        if (files == null || files.isEmpty()) {
+            return List.of();
+        }
+        if (files.size() > 3) {
+            throw new RuntimeException("問題附圖最多只能上傳 3 張");
+        }
+
+        try {
+            Path uploadPath = Paths.get(INQUIRY_UPLOAD_DIR);
+            if (!Files.exists(uploadPath)) {
+                Files.createDirectories(uploadPath);
+            }
+
+            List<String> uploadedUrls = new ArrayList<>();
+            for (MultipartFile file : files) {
+                if (file == null || file.isEmpty()) {
+                    throw new RuntimeException("問題附圖不可為空檔案");
+                }
+                String contentType = file.getContentType();
+                if (contentType == null || !contentType.startsWith("image/")) {
+                    throw new RuntimeException("問題附圖僅支援圖片格式");
+                }
+
+                String originalFilename = StringUtils.cleanPath(
+                        file.getOriginalFilename() != null ? file.getOriginalFilename() : "image.jpg"
+                );
+                String extension = originalFilename.contains(".")
+                        ? originalFilename.substring(originalFilename.lastIndexOf(".")) : ".jpg";
+                String newFilename = UUID.randomUUID() + extension;
+                Path filePath = uploadPath.resolve(newFilename);
+
+                Thumbnails.of(file.getInputStream())
+                        .size(1280, 1280)
+                        .outputQuality(0.75)
+                        .toFile(filePath.toFile());
+                uploadedUrls.add(baseUrl + "/" + INQUIRY_UPLOAD_DIR + newFilename);
+            }
+            return uploadedUrls;
+        } catch (IOException e) {
+            log.error("問題附圖上傳失敗", e);
+            throw new RuntimeException("問題附圖上傳失敗，請稍後再試");
         }
     }
 }

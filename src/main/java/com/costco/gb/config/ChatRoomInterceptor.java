@@ -1,9 +1,7 @@
 package com.costco.gb.config;
 
-import com.costco.gb.entity.Campaign;
-import com.costco.gb.repository.CampaignRepository;
-import com.costco.gb.repository.ParticipantRepository;
 import com.costco.gb.repository.PurchaseChatRoomMemberRepository;
+import com.costco.gb.service.CampaignChatAccessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.Message;
@@ -15,16 +13,12 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.stereotype.Component;
 
 import java.security.Principal;
-import java.time.LocalDateTime;
-import java.util.List;
-
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class ChatRoomInterceptor implements ChannelInterceptor {
 
-    private final CampaignRepository campaignRepository;
-    private final ParticipantRepository participantRepository;
+    private final CampaignChatAccessService campaignChatAccessService;
     private final PurchaseChatRoomMemberRepository purchaseChatRoomMemberRepository;
 
     @Override
@@ -38,25 +32,6 @@ public class ChatRoomInterceptor implements ChannelInterceptor {
             if (destination != null && destination.startsWith("/topic/campaigns/")) {
                 Long campaignId = extractCampaignId(destination);
 
-                Campaign campaign = campaignRepository.findById(campaignId).orElse(null);
-
-                // 🛡️ 防護一：檢查房間狀態
-                if (campaign == null || "CANCELLED".equals(campaign.getStatus()) ) {
-                    log.warn("拒絕連線！聊天室 {} 已關閉或不存在。", campaignId);
-                    throw new IllegalArgumentException("此聊天室已關閉，拒絕連線！");
-                }
-                // 在 ChatRoomInterceptor 的 preSend 邏輯中
-                if ("COMPLETED".equals(campaign.getStatus())) {
-                    // 假設我們允許結案後 3 天內仍可連線
-                    LocalDateTime gracePeriodEnd = campaign.getCompletedAt().plusDays(3);
-
-                    if (LocalDateTime.now().isAfter(gracePeriodEnd)) {
-                        log.warn("連線拒絕：合購單 {} 已結案超過 3 天緩衝期", campaignId);
-                        throw new IllegalArgumentException("聊天室已過期封存。");
-                    }
-                    // 如果在 3 天內，則放行 (allow subscription)
-                }
-
                 // 檢查使用者是否具有進入聊天室的權限
                 Principal userPrincipal = accessor.getUser();
                 if (userPrincipal == null) {
@@ -67,21 +42,11 @@ public class ChatRoomInterceptor implements ChannelInterceptor {
                 // 從 WebSocket Principal 取得已驗證的使用者 ID
                 Long currentUserId = Long.parseLong(userPrincipal.getName());
 
-                // 判斷 1：他是團主嗎？
-                boolean isHost = campaign.getHost().getId().equals(currentUserId);
-
-                // 判斷 2：他是有效的團員嗎？
-                // 僅允許團主或狀態仍有效的參與者進入聊天室
-                boolean isParticipant = participantRepository.existsByCampaignIdAndUserIdAndStatusIn(
-                        campaignId,
-                        currentUserId,
-                        List.of("JOINED", "CONFIRMED", "DISPUTED", "NO_SHOW")
-                );
-
-                // 💥 終極判決：既不是團主，也不是有效團員，直接踢掉！
-                if (!isHost && !isParticipant) {
-                    log.warn("安全攔截！使用者 {} 嘗試偷看合購單 {} 的聊天室被拒絕", currentUserId, campaignId);
-                    throw new IllegalArgumentException("您不是此合購單的成員，無法進入聊天室！");
+                // 即時訂閱只提供可讀寫聊天室；唯讀紀錄改由 REST 歷史訊息 API 取得。
+                if (campaignChatAccessService.getAccessLevel(campaignId, currentUserId)
+                        != CampaignChatAccessService.AccessLevel.READ_WRITE) {
+                    log.warn("拒絕使用者 {} 訂閱合購單 {} 聊天室", currentUserId, campaignId);
+                    throw new IllegalArgumentException("此聊天室目前無法訂閱。");
                 }
             }
             if (destination != null && destination.startsWith("/topic/chat/rooms/")) {

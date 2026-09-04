@@ -5,7 +5,6 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 
 @Data
 @Builder
@@ -26,9 +25,9 @@ public class PurchaseOrderDetailResponse {
     private String rewardType;
     private Integer rewardAmount;
     private String deliveryMethod;
+    // 由交付快照計算的公開摘要，不是 purchase_requests 資料庫欄位。
     private String deliveryPublicSummary;
-    private Map<String, Object> deliveryPrivateDetail;
-    private List<MeetupRangeResponse> meetupRanges;
+    private List<PurchaseRequestDeliveryDetailResponse> deliveryDetails;
     private String status;
     private LocalDateTime requesterConfirmedAt;
     private LocalDateTime runnerConfirmedAt;

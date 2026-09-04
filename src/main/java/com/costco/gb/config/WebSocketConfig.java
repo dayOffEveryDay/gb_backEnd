@@ -15,6 +15,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final WebSocketAuthInterceptor webSocketAuthInterceptor;
     private final ChatRoomInterceptor chatRoomInterceptor;
+    private final CampaignChatOutboundInterceptor campaignChatOutboundInterceptor;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -46,5 +47,11 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         // 5-1. 先過 authInterceptor 確保是合法登入的使用者
         // 5-2. 再過 chatRoomInterceptor 確保他有權限/房間未關閉
         registration.interceptors(webSocketAuthInterceptor,chatRoomInterceptor);
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        // 對每一個實際接收連線重新驗證，避免權限撤銷前建立的訂閱繼續收到訊息。
+        registration.interceptors(campaignChatOutboundInterceptor);
     }
 }

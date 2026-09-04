@@ -1,22 +1,16 @@
 package com.costco.gb.service;
 
 import com.costco.gb.dto.request.CreatePurchaseRequestRequest;
-import com.costco.gb.dto.request.MeetupRangeRequest;
 import com.costco.gb.dto.request.UpdatePurchaseRequestRequest;
-import com.costco.gb.dto.response.MeetupRangeResponse;
 import com.costco.gb.dto.response.PurchaseRequestDetailResponse;
 import com.costco.gb.dto.response.PurchaseRequestSummaryResponse;
 import com.costco.gb.entity.PurchaseOrder;
 import com.costco.gb.entity.PurchaseQuote;
 import com.costco.gb.entity.PurchaseRequest;
-import com.costco.gb.entity.PurchaseRequestMeetupRange;
 import com.costco.gb.entity.User;
-import com.costco.gb.entity.UserDeliveryProfile;
 import com.costco.gb.repository.PurchaseOrderRepository;
 import com.costco.gb.repository.PurchaseQuoteRepository;
-import com.costco.gb.repository.PurchaseRequestMeetupRangeRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
-import com.costco.gb.repository.UserDeliveryProfileRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,31 +23,25 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class PurchaseRequestService {
 
-    private static final String FACE_TO_FACE = "FACE_TO_FACE";
+    private static final int REOPEN_MINIMUM_HOURS = 24;
     private static final Set<String> REWARD_TYPES = Set.of("FIXED", "QUOTE");
     private static final Set<String> DELIVERY_METHODS = Set.of(
-            FACE_TO_FACE, "HOME_DELIVERY", "STORE_TO_STORE"
+            "FACE_TO_FACE", "HOME_DELIVERY", "STORE_TO_STORE", "IBOX"
     );
     private static final Set<String> REQUEST_STATUSES = Set.of(
-            "OPEN", "QUOTING", "ORDERED", "EXPIRED", "CANCELLED"
-    );
-    private static final Set<String> MEETUP_LOCATION_TYPES = Set.of(
-            "TRANSIT_RANGE", "LANDMARK", "ROAD", "DISTRICT", "CUSTOM"
+            "OPEN", "QUOTING", "ORDERED", "AWAITING_REOPEN", "EXPIRED", "CANCELLED"
     );
 
     private final PurchaseRequestRepository purchaseRequestRepository;
-    private final PurchaseRequestMeetupRangeRepository meetupRangeRepository;
-    private final UserDeliveryProfileRepository profileRepository;
+    private final PurchaseDeliveryService purchaseDeliveryService;
     private final PurchaseQuoteRepository quoteRepository;
     private final PurchaseOrderRepository orderRepository;
     private final UserRepository userRepository;
@@ -71,7 +59,7 @@ public class PurchaseRequestService {
         User requester = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("找不到目前登入使用者"));
 
-        // 先建立委託單，取得主鍵後才能保存面交快照。
+        // 先建立託購單，取得主鍵後才能保存交付快照。
         PurchaseRequest purchaseRequest = PurchaseRequest.builder()
                 .requester(requester)
                 .itemName(request.getItemName().trim())
@@ -79,11 +67,7 @@ public class PurchaseRequestService {
                 .imageUrls(toStorageImageUrls(request.getImageUrls()))
                 .rewardType(rewardType)
                 .fixedRewardAmount("FIXED".equals(rewardType) ? request.getFixedRewardAmount() : null)
-                .requesterCity(request.getRequesterCity().trim())
-                .requesterDistrict(request.getRequesterDistrict())
                 .deliveryMethod(deliveryMethod)
-                .deliveryPublicSummary(request.getDeliveryPublicSummary().trim())
-                .deliveryPrivateDetail(FACE_TO_FACE.equals(deliveryMethod) ? null : request.getDeliveryPrivateDetail())
                 .requestExpireTime(request.getRequestExpireTime())
                 .deliveryDeadlineHours(request.getDeliveryDeadlineHours())
                 .minCreditScore(request.getMinCreditScore() == null ? 0 : request.getMinCreditScore())
@@ -91,18 +75,8 @@ public class PurchaseRequestService {
                 .build();
         purchaseRequestRepository.save(purchaseRequest);
 
-        // 面交資料必須複製成委託單快照，避免常用資料日後修改而改變既有委託。
-        if (FACE_TO_FACE.equals(deliveryMethod)) {
-            replaceMeetupRanges(
-                    purchaseRequest,
-                    requester,
-                    request.getSelectedProfileIds(),
-                    request.getManualMeetupRanges(),
-                    Boolean.TRUE.equals(request.getSaveManualToProfile())
-            );
-        } else if (Boolean.TRUE.equals(request.getSaveDeliveryToProfile())) {
-            saveDeliveryProfile(requester, purchaseRequest);
-        }
+        // 無論交付方式為何，都從登入者選取的常用資料建立不可變快照。
+        purchaseDeliveryService.replaceSnapshots(purchaseRequest, request.getSelectedProfileIds());
 
         return purchaseRequest.getId();
     }
@@ -162,19 +136,11 @@ public class PurchaseRequestService {
     @Transactional(readOnly = true)
     public PurchaseRequestDetailResponse getDetail(Long requestId, Long currentUserId) {
         PurchaseRequest purchaseRequest = findRequest(requestId);
-        List<PurchaseRequestMeetupRange> ranges = FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
-                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(requestId)
-                : List.of();
-
-        // 私密交付資料只有訂單成立後的交易雙方可讀取；公開詳情一律隱藏。
-        Map<String, Object> privateDetail = null;
-        if (currentUserId != null) {
-            privateDetail = orderRepository.findFirstByPurchaseRequestIdOrderByCreatedAtDesc(requestId)
-                    .filter(order -> isOrderParty(order, currentUserId))
-                    .map(order -> purchaseRequest.getDeliveryPrivateDetail())
-                    .orElse(null);
-        }
-        return toDetailResponse(purchaseRequest, ranges, privateDetail);
+        // 公開查詢僅回傳安全欄位；委託人與已成立訂單雙方可以讀取完整交付快照。
+        boolean includePrivate = currentUserId != null && (purchaseRequest.getRequester().getId().equals(currentUserId)
+                || orderRepository.findFirstByPurchaseRequestIdOrderByCreatedAtDesc(requestId)
+                .filter(order -> isOrderParty(order, currentUserId)).isPresent());
+        return toDetailResponse(purchaseRequest, includePrivate);
     }
 
     @Transactional
@@ -194,34 +160,16 @@ public class PurchaseRequestService {
             applyOpenRequestChanges(purchaseRequest, request);
             validatePersistedRequest(purchaseRequest);
 
-            boolean meetupChanged = request.getSelectedProfileIds() != null
-                    || request.getManualMeetupRanges() != null;
-            if (FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())) {
-                if (meetupChanged) {
-                    replaceMeetupRanges(
-                            purchaseRequest,
-                            purchaseRequest.getRequester(),
-                            request.getSelectedProfileIds(),
-                            request.getManualMeetupRanges(),
-                            Boolean.TRUE.equals(request.getSaveManualToProfile())
-                    );
-                } else if (meetupRangeRepository.countByPurchaseRequestId(requestId) == 0) {
-                    throw new RuntimeException("面交委託至少需要一筆面交範圍");
-                }
-                purchaseRequest.setDeliveryPrivateDetail(null);
-            } else {
-                meetupRangeRepository.deleteByPurchaseRequestId(requestId);
-                if (Boolean.TRUE.equals(request.getSaveDeliveryToProfile())) {
-                    saveDeliveryProfile(purchaseRequest.getRequester(), purchaseRequest);
-                }
+            if (request.getDeliveryMethod() != null && request.getSelectedProfileIds() == null) {
+                throw new RuntimeException("修改交付方式時必須重新選擇常用交付資料");
+            }
+            if (request.getSelectedProfileIds() != null) {
+                purchaseDeliveryService.replaceSnapshots(purchaseRequest, request.getSelectedProfileIds());
             }
         }
 
         purchaseRequestRepository.save(purchaseRequest);
-        List<PurchaseRequestMeetupRange> ranges = FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
-                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(requestId)
-                : List.of();
-        return toDetailResponse(purchaseRequest, ranges, null);
+        return toDetailResponse(purchaseRequest, true);
     }
 
     @Transactional
@@ -247,10 +195,36 @@ public class PurchaseRequestService {
         extendDeadline(purchaseRequest, newExpireTime);
         purchaseRequestRepository.save(purchaseRequest);
 
-        List<PurchaseRequestMeetupRange> ranges = FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
-                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(requestId)
-                : List.of();
-        return toDetailResponse(purchaseRequest, ranges, null);
+        return toDetailResponse(purchaseRequest, true);
+    }
+
+    @Transactional
+    public PurchaseRequestDetailResponse reopen(Long userId, Long requestId) {
+        PurchaseRequest purchaseRequest = purchaseRequestRepository.findByIdForUpdate(requestId)
+                .orElseThrow(() -> new RuntimeException("找不到委託單"));
+        if (!purchaseRequest.getRequester().getId().equals(userId)) {
+            throw new RuntimeException("只有委託人可以重新開放此委託單");
+        }
+        if (!"FIXED".equals(purchaseRequest.getRewardType())) {
+            throw new RuntimeException("目前只有固定酬金委託可以重新開放");
+        }
+        if (!"AWAITING_REOPEN".equals(purchaseRequest.getStatus())) {
+            throw new RuntimeException("目前委託單狀態不可重新開放");
+        }
+
+        // 重開後至少保留完整 24 小時募集時間；原期限較晚時則維持原期限。
+        LocalDateTime minimumExpireTime = LocalDateTime.now().plusHours(REOPEN_MINIMUM_HOURS);
+        if (purchaseRequest.getRequestExpireTime().isBefore(minimumExpireTime)) {
+            purchaseRequest.setRequestExpireTime(minimumExpireTime);
+        }
+        purchaseRequest.setStatus("OPEN");
+        purchaseRequest.setReopenCount((purchaseRequest.getReopenCount() == null
+                ? 0 : purchaseRequest.getReopenCount()) + 1);
+        purchaseRequest.setLastReopenReason("ITEM_UNAVAILABLE");
+        purchaseRequest.setExpiredAt(null);
+        purchaseRequestRepository.save(purchaseRequest);
+
+        return toDetailResponse(purchaseRequest, true);
     }
 
     @Transactional
@@ -306,16 +280,8 @@ public class PurchaseRequestService {
             throw new RuntimeException("最低信用分不可小於 0");
         }
 
-        boolean hasSelectedProfiles = request.getSelectedProfileIds() != null
-                && !request.getSelectedProfileIds().isEmpty();
-        boolean hasManualRanges = request.getManualMeetupRanges() != null
-                && !request.getManualMeetupRanges().isEmpty();
-        if (FACE_TO_FACE.equals(deliveryMethod) && !hasSelectedProfiles && !hasManualRanges) {
-            throw new RuntimeException("面交委託至少需要一筆面交範圍");
-        }
-        if (!FACE_TO_FACE.equals(deliveryMethod)
-                && (request.getDeliveryPrivateDetail() == null || request.getDeliveryPrivateDetail().isEmpty())) {
-            throw new RuntimeException("宅配或店到店必須提供私密交付資料");
+        if (request.getSelectedProfileIds() == null || request.getSelectedProfileIds().isEmpty()) {
+            throw new RuntimeException("請選擇至少一筆常用交付資料");
         }
     }
 
@@ -335,20 +301,8 @@ public class PurchaseRequestService {
         if (request.getFixedRewardAmount() != null) {
             purchaseRequest.setFixedRewardAmount(request.getFixedRewardAmount());
         }
-        if (request.getRequesterCity() != null) {
-            purchaseRequest.setRequesterCity(request.getRequesterCity().trim());
-        }
-        if (request.getRequesterDistrict() != null) {
-            purchaseRequest.setRequesterDistrict(request.getRequesterDistrict());
-        }
         if (request.getDeliveryMethod() != null) {
             purchaseRequest.setDeliveryMethod(normalizeRequired(request.getDeliveryMethod(), "交付方式不可空白"));
-        }
-        if (request.getDeliveryPublicSummary() != null) {
-            purchaseRequest.setDeliveryPublicSummary(request.getDeliveryPublicSummary().trim());
-        }
-        if (request.getDeliveryPrivateDetail() != null) {
-            purchaseRequest.setDeliveryPrivateDetail(request.getDeliveryPrivateDetail());
         }
         if (request.getRequestExpireTime() != null) {
             if (!request.getRequestExpireTime().isAfter(LocalDateTime.now())) {
@@ -383,134 +337,6 @@ public class PurchaseRequestService {
         if (purchaseRequest.getMinCreditScore() == null || purchaseRequest.getMinCreditScore() < 0) {
             throw new RuntimeException("最低信用分不可小於 0");
         }
-        if (!FACE_TO_FACE.equals(purchaseRequest.getDeliveryMethod())
-                && (purchaseRequest.getDeliveryPrivateDetail() == null
-                || purchaseRequest.getDeliveryPrivateDetail().isEmpty())) {
-            throw new RuntimeException("宅配或店到店必須提供私密交付資料");
-        }
-    }
-
-    private void replaceMeetupRanges(
-            PurchaseRequest purchaseRequest,
-            User requester,
-            List<Long> selectedProfileIds,
-            List<MeetupRangeRequest> manualRanges,
-            boolean saveManualToProfile
-    ) {
-        List<Long> profileIds = selectedProfileIds == null
-                ? List.of()
-                : new ArrayList<>(new LinkedHashSet<>(selectedProfileIds));
-        List<MeetupRangeRequest> ranges = manualRanges == null ? List.of() : manualRanges;
-        if (profileIds.isEmpty() && ranges.isEmpty()) {
-            throw new RuntimeException("面交委託至少需要一筆面交範圍");
-        }
-
-        List<UserDeliveryProfile> profiles = profileRepository.findAllById(profileIds);
-        if (profiles.size() != profileIds.size()) {
-            throw new RuntimeException("部分常用交付資料不存在");
-        }
-        for (UserDeliveryProfile profile : profiles) {
-            if (!profile.getUser().getId().equals(requester.getId())) {
-                throw new RuntimeException("不可使用其他使用者的常用交付資料");
-            }
-            if (!FACE_TO_FACE.equals(profile.getProfileType())) {
-                throw new RuntimeException("面交委託只能選用面交類型的常用資料");
-            }
-        }
-        for (MeetupRangeRequest range : ranges) {
-            validateMeetupRange(range);
-        }
-
-        meetupRangeRepository.deleteByPurchaseRequestId(purchaseRequest.getId());
-        List<PurchaseRequestMeetupRange> snapshots = new ArrayList<>();
-        profiles.forEach(profile -> snapshots.add(snapshotFromProfile(purchaseRequest, profile)));
-        ranges.forEach(range -> snapshots.add(snapshotFromManual(purchaseRequest, range)));
-        meetupRangeRepository.saveAll(snapshots);
-
-        // 使用者明確選擇保存時，才將手動面交資料另存為可重複使用的模板。
-        if (saveManualToProfile) {
-            ranges.forEach(range -> profileRepository.save(profileFromManual(requester, range)));
-        }
-    }
-
-    private void validateMeetupRange(MeetupRangeRequest range) {
-        if (range == null) {
-            throw new RuntimeException("面交範圍不可為空");
-        }
-        String locationType = normalizeRequired(range.getLocationType(), "面交地點類型不可空白");
-        if (!MEETUP_LOCATION_TYPES.contains(locationType)) {
-            throw new RuntimeException("不支援的面交地點類型: " + locationType);
-        }
-        if (range.getDisplayText() == null || range.getDisplayText().isBlank()) {
-            throw new RuntimeException("面交顯示文字不可空白");
-        }
-    }
-
-    private PurchaseRequestMeetupRange snapshotFromProfile(
-            PurchaseRequest purchaseRequest,
-            UserDeliveryProfile profile
-    ) {
-        return PurchaseRequestMeetupRange.builder()
-                .purchaseRequest(purchaseRequest)
-                .sourceProfile(profile)
-                .locationType(profile.getLocationType())
-                .city(profile.getCity())
-                .district(profile.getDistrict())
-                .locationName(profile.getLocationName())
-                .rangeStart(profile.getRangeStart())
-                .rangeEnd(profile.getRangeEnd())
-                .displayText(profile.getDisplayText())
-                .detail(profile.getDetail())
-                .build();
-    }
-
-    private PurchaseRequestMeetupRange snapshotFromManual(
-            PurchaseRequest purchaseRequest,
-            MeetupRangeRequest range
-    ) {
-        return PurchaseRequestMeetupRange.builder()
-                .purchaseRequest(purchaseRequest)
-                .locationType(normalizeRequired(range.getLocationType(), "面交地點類型不可空白"))
-                .city(range.getCity())
-                .district(range.getDistrict())
-                .locationName(range.getLocationName())
-                .rangeStart(range.getRangeStart())
-                .rangeEnd(range.getRangeEnd())
-                .displayText(range.getDisplayText().trim())
-                .detail(range.getDetail())
-                .latitude(range.getLatitude())
-                .longitude(range.getLongitude())
-                .build();
-    }
-
-    private UserDeliveryProfile profileFromManual(User requester, MeetupRangeRequest range) {
-        return UserDeliveryProfile.builder()
-                .user(requester)
-                .profileType(FACE_TO_FACE)
-                .locationType(normalizeRequired(range.getLocationType(), "面交地點類型不可空白"))
-                .city(range.getCity())
-                .district(range.getDistrict())
-                .locationName(range.getLocationName())
-                .rangeStart(range.getRangeStart())
-                .rangeEnd(range.getRangeEnd())
-                .displayText(range.getDisplayText().trim())
-                .detail(range.getDetail())
-                .isDefault(false)
-                .build();
-    }
-
-    private void saveDeliveryProfile(User requester, PurchaseRequest purchaseRequest) {
-        UserDeliveryProfile profile = UserDeliveryProfile.builder()
-                .user(requester)
-                .profileType(purchaseRequest.getDeliveryMethod())
-                .locationType("HOME_DELIVERY".equals(purchaseRequest.getDeliveryMethod()) ? "ADDRESS" : "STORE")
-                .city(purchaseRequest.getRequesterCity())
-                .district(purchaseRequest.getRequesterDistrict())
-                .displayText(purchaseRequest.getDeliveryPublicSummary())
-                .detail(purchaseRequest.getDeliveryPrivateDetail())
-                .isDefault(false)
-                .build();
-        profileRepository.save(profile);
     }
 
     private void extendDeadline(PurchaseRequest purchaseRequest, LocalDateTime newExpireTime) {
@@ -542,6 +368,7 @@ public class PurchaseRequestService {
 
     private PurchaseRequestSummaryResponse toSummaryResponse(PurchaseRequest purchaseRequest) {
         User requester = purchaseRequest.getRequester();
+        var details = purchaseDeliveryService.read(purchaseRequest, false);
         return PurchaseRequestSummaryResponse.builder()
                 .id(purchaseRequest.getId())
                 .requesterId(requester.getId())
@@ -551,10 +378,9 @@ public class PurchaseRequestService {
                 .imageUrls(toPublicImageUrls(purchaseRequest.getImageUrls()))
                 .rewardType(purchaseRequest.getRewardType())
                 .fixedRewardAmount(purchaseRequest.getFixedRewardAmount())
-                .requesterCity(purchaseRequest.getRequesterCity())
-                .requesterDistrict(purchaseRequest.getRequesterDistrict())
                 .deliveryMethod(purchaseRequest.getDeliveryMethod())
-                .deliveryPublicSummary(purchaseRequest.getDeliveryPublicSummary())
+                .deliveryPublicSummary(purchaseDeliveryService.publicSummary(purchaseRequest.getDeliveryMethod(), details))
+                .deliveryDetails(details)
                 .requestExpireTime(purchaseRequest.getRequestExpireTime())
                 .deliveryDeadlineHours(purchaseRequest.getDeliveryDeadlineHours())
                 .minCreditScore(purchaseRequest.getMinCreditScore())
@@ -563,12 +389,9 @@ public class PurchaseRequestService {
                 .build();
     }
 
-    private PurchaseRequestDetailResponse toDetailResponse(
-            PurchaseRequest purchaseRequest,
-            List<PurchaseRequestMeetupRange> ranges,
-            Map<String, Object> privateDetail
-    ) {
+    private PurchaseRequestDetailResponse toDetailResponse(PurchaseRequest purchaseRequest, boolean includePrivate) {
         User requester = purchaseRequest.getRequester();
+        var details = purchaseDeliveryService.read(purchaseRequest, includePrivate);
         return PurchaseRequestDetailResponse.builder()
                 .id(purchaseRequest.getId())
                 .requesterId(requester.getId())
@@ -580,12 +403,9 @@ public class PurchaseRequestService {
                 .imageUrls(toPublicImageUrls(purchaseRequest.getImageUrls()))
                 .rewardType(purchaseRequest.getRewardType())
                 .fixedRewardAmount(purchaseRequest.getFixedRewardAmount())
-                .requesterCity(purchaseRequest.getRequesterCity())
-                .requesterDistrict(purchaseRequest.getRequesterDistrict())
                 .deliveryMethod(purchaseRequest.getDeliveryMethod())
-                .deliveryPublicSummary(purchaseRequest.getDeliveryPublicSummary())
-                .deliveryPrivateDetail(privateDetail)
-                .meetupRanges(ranges.stream().map(this::toMeetupRangeResponse).toList())
+                .deliveryPublicSummary(purchaseDeliveryService.publicSummary(purchaseRequest.getDeliveryMethod(), details))
+                .deliveryDetails(details)
                 .requestExpireTime(purchaseRequest.getRequestExpireTime())
                 .deliveryDeadlineHours(purchaseRequest.getDeliveryDeadlineHours())
                 .minCreditScore(purchaseRequest.getMinCreditScore())
@@ -598,26 +418,6 @@ public class PurchaseRequestService {
                 .build();
     }
 
-    private MeetupRangeResponse toMeetupRangeResponse(PurchaseRequestMeetupRange range) {
-        return MeetupRangeResponse.builder()
-                .id(range.getId())
-                .sourceProfileId(range.getSourceProfile() == null ? null : range.getSourceProfile().getId())
-                .locationType(range.getLocationType())
-                .city(range.getCity())
-                .district(range.getDistrict())
-                .locationName(range.getLocationName())
-                .rangeStart(range.getRangeStart())
-                .rangeEnd(range.getRangeEnd())
-                .displayText(range.getDisplayText())
-                .detail(range.getDetail())
-                .latitude(range.getLatitude())
-                .longitude(range.getLongitude())
-                .build();
-    }
-
-    private List<String> copyList(List<String> values) {
-        return values == null ? new ArrayList<>() : new ArrayList<>(values);
-    }
 
     private List<String> toPublicImageUrls(List<String> values) {
         if (values == null) {

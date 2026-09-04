@@ -5,7 +5,6 @@ import com.costco.gb.dto.request.ItemUnavailableRequest;
 import com.costco.gb.dto.request.ReportPurchaseOrderAbnormalRequest;
 import com.costco.gb.dto.request.RespondPurchaseOrderAbnormalRequest;
 import com.costco.gb.dto.request.ShipPurchaseOrderRequest;
-import com.costco.gb.dto.response.MeetupRangeResponse;
 import com.costco.gb.dto.response.PurchaseOrderDetailResponse;
 import com.costco.gb.dto.response.PurchaseOrderEventResponse;
 import com.costco.gb.dto.response.PurchaseOrderSummaryResponse;
@@ -14,13 +13,11 @@ import com.costco.gb.entity.PurchaseChatRoom;
 import com.costco.gb.entity.PurchaseOrderEvent;
 import com.costco.gb.entity.PurchaseQuote;
 import com.costco.gb.entity.PurchaseRequest;
-import com.costco.gb.entity.PurchaseRequestMeetupRange;
 import com.costco.gb.entity.User;
 import com.costco.gb.repository.PurchaseOrderEventRepository;
 import com.costco.gb.repository.PurchaseChatRoomRepository;
 import com.costco.gb.repository.PurchaseOrderRepository;
 import com.costco.gb.repository.PurchaseQuoteRepository;
-import com.costco.gb.repository.PurchaseRequestMeetupRangeRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -61,7 +58,7 @@ public class PurchaseOrderService {
     private final PurchaseOrderRepository orderRepository;
     private final PurchaseOrderEventRepository orderEventRepository;
     private final PurchaseRequestRepository purchaseRequestRepository;
-    private final PurchaseRequestMeetupRangeRepository meetupRangeRepository;
+    private final PurchaseDeliveryService purchaseDeliveryService;
     private final PurchaseQuoteRepository quoteRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
@@ -185,7 +182,14 @@ public class PurchaseOrderService {
         order.setBlameUser(null);
         order.setCreditPenalty(0);
         order.setCancelledAt(LocalDateTime.now());
-        reopenOrExpireRequest(order.getPurchaseRequest(), "ITEM_UNAVAILABLE", true);
+        // 固定價缺貨先交由委託人決定是否重新募集，避免接單人單方面讓委託再次公開。
+        PurchaseRequest purchaseRequest = order.getPurchaseRequest();
+        if ("FIXED".equals(purchaseRequest.getRewardType())) {
+            purchaseRequest.setStatus("AWAITING_REOPEN");
+            purchaseRequestRepository.save(purchaseRequest);
+        } else {
+            reopenOrExpireRequest(purchaseRequest, "ITEM_UNAVAILABLE", true);
+        }
 
         PurchaseQuote selectedQuote = order.getSelectedQuote();
         if (selectedQuote != null) {
@@ -199,7 +203,8 @@ public class PurchaseOrderService {
         metadata.put("storeName", request.getStoreName());
         orderRepository.save(order);
         recordEvent(order, order.getRunner(), "ITEM_UNAVAILABLE_REPORTED", fromStatus, order.getStatus(), metadata);
-        notify(order.getRequester(), "PURCHASE_ITEM_UNAVAILABLE", order, "接單人回報商品缺貨");
+        notify(order.getRequester(), "PURCHASE_ITEM_UNAVAILABLE", order,
+                "接單人回報商品缺貨，請決定是否重新開放委託");
         return toDetailResponse(order, userId);
     }
 
@@ -271,7 +276,7 @@ public class PurchaseOrderService {
         PurchaseOrder order = lockOrder(orderId);
         validateRunner(order, userId);
         requireStatus(order, "IN_PROGRESS");
-        if (!Set.of("HOME_DELIVERY", "STORE_TO_STORE")
+        if (!Set.of("HOME_DELIVERY", "STORE_TO_STORE", "IBOX")
                 .contains(order.getPurchaseRequest().getDeliveryMethod())) {
             throw new RuntimeException("只有宅配或店到店訂單可以標記寄出");
         }
@@ -739,9 +744,7 @@ public class PurchaseOrderService {
 
     private PurchaseOrderDetailResponse toDetailResponse(PurchaseOrder order, Long userId) {
         PurchaseRequest request = order.getPurchaseRequest();
-        List<PurchaseRequestMeetupRange> ranges = "FACE_TO_FACE".equals(request.getDeliveryMethod())
-                ? meetupRangeRepository.findByPurchaseRequestIdOrderById(request.getId())
-                : List.of();
+        var details = purchaseDeliveryService.read(request, true);
         return PurchaseOrderDetailResponse.builder()
                 .id(order.getId())
                 .purchaseRequestId(request.getId())
@@ -760,9 +763,8 @@ public class PurchaseOrderService {
                 .rewardType(request.getRewardType())
                 .rewardAmount(resolveRewardAmount(order))
                 .deliveryMethod(request.getDeliveryMethod())
-                .deliveryPublicSummary(request.getDeliveryPublicSummary())
-                .deliveryPrivateDetail(request.getDeliveryPrivateDetail())
-                .meetupRanges(ranges.stream().map(this::toMeetupRangeResponse).toList())
+                .deliveryPublicSummary(purchaseDeliveryService.publicSummary(request.getDeliveryMethod(), details))
+                .deliveryDetails(details)
                 .status(order.getStatus())
                 .requesterConfirmedAt(order.getRequesterConfirmedAt())
                 .runnerConfirmedAt(order.getRunnerConfirmedAt())
@@ -848,23 +850,6 @@ public class PurchaseOrderService {
         return order.getCreatedAt().plusHours(order.getPurchaseRequest().getDeliveryDeadlineHours());
     }
 
-    private MeetupRangeResponse toMeetupRangeResponse(PurchaseRequestMeetupRange range) {
-        return MeetupRangeResponse.builder()
-                .id(range.getId())
-                .sourceProfileId(range.getSourceProfile() == null ? null : range.getSourceProfile().getId())
-                .locationType(range.getLocationType())
-                .city(range.getCity())
-                .district(range.getDistrict())
-                .locationName(range.getLocationName())
-                .rangeStart(range.getRangeStart())
-                .rangeEnd(range.getRangeEnd())
-                .displayText(range.getDisplayText())
-                .detail(range.getDetail())
-                .latitude(range.getLatitude())
-                .longitude(range.getLongitude())
-                .build();
-    }
-
     private PurchaseOrderEventResponse toEventResponse(PurchaseOrderEvent event) {
         return PurchaseOrderEventResponse.builder()
                 .id(event.getId())
@@ -880,9 +865,6 @@ public class PurchaseOrderService {
                 .build();
     }
 
-    private List<String> copyList(List<String> values) {
-        return values == null ? new ArrayList<>() : new ArrayList<>(values);
-    }
 
     private List<String> toPublicImageUrls(List<String> values) {
         if (values == null) {

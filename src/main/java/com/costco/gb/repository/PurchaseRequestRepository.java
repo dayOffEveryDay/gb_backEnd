@@ -23,8 +23,9 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
     @Query("SELECT pr FROM PurchaseRequest pr WHERE " +
             "((:status IS NULL AND pr.status IN ('OPEN', 'QUOTING')) OR pr.status = :status) AND " +
             "(:status IS NOT NULL OR pr.requestExpireTime > :now) AND " +
-            "(:city IS NULL OR pr.requesterCity = :city) AND " +
-            "(:district IS NULL OR pr.requesterDistrict = :district) AND " +
+            "((:city IS NULL AND :district IS NULL) OR EXISTS (" +
+            "SELECT d.id FROM PurchaseRequestDeliveryDetail d WHERE d.purchaseRequest = pr " +
+            "AND (:city IS NULL OR d.city = :city) AND (:district IS NULL OR d.district = :district))) AND " +
             "(:deliveryMethod IS NULL OR pr.deliveryMethod = :deliveryMethod) AND " +
             "(:rewardType IS NULL OR pr.rewardType = :rewardType) AND " +
             "(:keyword IS NULL OR LOWER(pr.itemName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +

@@ -44,6 +44,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/campaigns/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/purchase-requests").permitAll()
                         .requestMatchers(new RegexRequestMatcher("^/api/v1/purchase-requests/\\d+$", "GET")).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/inquiries/**", "/api/v1/inquiries/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .anyRequest().authenticated()
                 )

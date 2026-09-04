@@ -5,7 +5,6 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 
 @Data
 @Builder
@@ -20,12 +19,10 @@ public class PurchaseRequestDetailResponse {
     private List<String> imageUrls;
     private String rewardType;
     private Integer fixedRewardAmount;
-    private String requesterCity;
-    private String requesterDistrict;
     private String deliveryMethod;
+    // 由交付快照計算的公開摘要，不是 purchase_requests 資料庫欄位。
     private String deliveryPublicSummary;
-    private Map<String, Object> deliveryPrivateDetail;
-    private List<MeetupRangeResponse> meetupRanges;
+    private List<PurchaseRequestDeliveryDetailResponse> deliveryDetails;
     private LocalDateTime requestExpireTime;
     private Integer deliveryDeadlineHours;
     private Integer minCreditScore;
