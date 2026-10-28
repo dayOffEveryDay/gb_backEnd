@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.CreatePurchaseRequestRequest;
 import com.costco.gb.dto.request.UpdatePurchaseRequestRequest;
 import com.costco.gb.dto.response.PurchaseRequestDetailResponse;
@@ -13,6 +14,7 @@ import com.costco.gb.repository.PurchaseQuoteRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseRequestService {
@@ -78,6 +81,8 @@ public class PurchaseRequestService {
         // 無論交付方式為何，都從登入者選取的常用資料建立不可變快照。
         purchaseDeliveryService.replaceSnapshots(purchaseRequest, request.getSelectedProfileIds());
 
+        BusinessLog.info(log, "event=PURCHASE_REQUEST_CREATED actorId={} requestId={} status={} rewardType={} rewardAmount={} deliveryMethod={} expiresAt={}",
+                userId, purchaseRequest.getId(), purchaseRequest.getStatus(), rewardType, purchaseRequest.getFixedRewardAmount(), deliveryMethod, purchaseRequest.getRequestExpireTime());
         return purchaseRequest.getId();
     }
 
@@ -150,6 +155,10 @@ public class PurchaseRequestService {
             throw new RuntimeException("目前委託單狀態不可修改");
         }
 
+        String beforeStatus = purchaseRequest.getStatus();
+        Integer beforeReward = purchaseRequest.getFixedRewardAmount();
+        String beforeDelivery = purchaseRequest.getDeliveryMethod();
+        LocalDateTime beforeExpiry = purchaseRequest.getRequestExpireTime();
         boolean hasActiveQuote = quoteRepository.existsByPurchaseRequestIdAndStatus(requestId, "ACTIVE");
         if ("QUOTING".equals(purchaseRequest.getStatus()) || hasActiveQuote) {
             if (request.hasNonExpiryChanges() || request.getRequestExpireTime() == null) {
@@ -169,6 +178,8 @@ public class PurchaseRequestService {
         }
 
         purchaseRequestRepository.save(purchaseRequest);
+        BusinessLog.info(log, "event=PURCHASE_REQUEST_UPDATED actorId={} requestId={} beforeStatus={} afterStatus={} beforeReward={} afterReward={} beforeDelivery={} afterDelivery={} beforeExpiry={} afterExpiry={}",
+                userId, requestId, beforeStatus, purchaseRequest.getStatus(), beforeReward, purchaseRequest.getFixedRewardAmount(), beforeDelivery, purchaseRequest.getDeliveryMethod(), beforeExpiry, purchaseRequest.getRequestExpireTime());
         return toDetailResponse(purchaseRequest, true);
     }
 
@@ -180,10 +191,12 @@ public class PurchaseRequestService {
         }
 
         // 取消委託時一併使所有有效報價失效，不產生信用扣分。
+        String beforeStatus = purchaseRequest.getStatus();
         purchaseRequest.setStatus("CANCELLED");
         purchaseRequest.setCancelledAt(LocalDateTime.now());
         quoteRepository.expireActiveQuotes(requestId);
         purchaseRequestRepository.save(purchaseRequest);
+        BusinessLog.info(log, "event=PURCHASE_REQUEST_CANCELLED actorId={} requestId={} beforeStatus={} afterStatus=CANCELLED", userId, requestId, beforeStatus);
     }
 
     @Transactional
@@ -192,7 +205,9 @@ public class PurchaseRequestService {
         if (!Set.of("OPEN", "QUOTING").contains(purchaseRequest.getStatus())) {
             throw new RuntimeException("目前委託單狀態不可延長期限");
         }
+        LocalDateTime beforeExpiry = purchaseRequest.getRequestExpireTime();
         extendDeadline(purchaseRequest, newExpireTime);
+        BusinessLog.info(log, "event=PURCHASE_REQUEST_EXTENDED actorId={} requestId={} beforeExpiry={} afterExpiry={}", userId, requestId, beforeExpiry, purchaseRequest.getRequestExpireTime());
         purchaseRequestRepository.save(purchaseRequest);
 
         return toDetailResponse(purchaseRequest, true);
@@ -222,6 +237,7 @@ public class PurchaseRequestService {
                 ? 0 : purchaseRequest.getReopenCount()) + 1);
         purchaseRequest.setLastReopenReason("ITEM_UNAVAILABLE");
         purchaseRequest.setExpiredAt(null);
+        BusinessLog.info(log, "event=PURCHASE_REQUEST_REOPENED actorId={} requestId={} beforeStatus=AWAITING_REOPEN afterStatus=OPEN reopenCount={} expiresAt={}", userId, requestId, purchaseRequest.getReopenCount(), purchaseRequest.getRequestExpireTime());
         purchaseRequestRepository.save(purchaseRequest);
 
         return toDetailResponse(purchaseRequest, true);
@@ -239,6 +255,7 @@ public class PurchaseRequestService {
                     || request.getRequestExpireTime().isAfter(LocalDateTime.now())) {
                 continue;
             }
+            String beforeStatus = request.getStatus();
             request.setStatus("EXPIRED");
             request.setExpiredAt(LocalDateTime.now());
             purchaseRequestRepository.save(request);
@@ -250,6 +267,7 @@ public class PurchaseRequestService {
                     request.getId(), "託購委託已到期");
             activeQuotes.forEach(quote -> notificationService.sendNotification(quote.getQuoter(),
                     "PURCHASE_QUOTE_EXPIRED", request.getId(), "您參與報價的託購已到期"));
+            BusinessLog.info(log, "event=PURCHASE_REQUEST_EXPIRED actor=SYSTEM requestId={} beforeStatus={} afterStatus=EXPIRED expiredQuoteCount={}", request.getId(), beforeStatus, activeQuotes.size());
             processed++;
         }
         return processed;

@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.response.NotificationResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
@@ -38,7 +39,7 @@ public class NotificationService {
             sendNotification(p.getUser(), "CAMPAIGN_FULL", campaignId, participantContent);
         }
 
-        log.info("合購單 {} 滿單推播發送完畢，共計通知 {} 位團員與 1 位團主", campaignId, participants.size());
+        BusinessLog.info(log, "合購單 {} 滿單推播發送完畢，共計通知 {} 位團員與 1 位團主", campaignId, participants.size());
     }
 
     // 合購單取消時通知所有受影響的參與者
@@ -50,7 +51,7 @@ public class NotificationService {
             // 以 CAMPAIGN_CANCELLED 類型發送取消通知
             sendNotification(p.getUser(), "CAMPAIGN_CANCELLED", campaign.getId(), content);
         }
-        log.info("已發送合購單取消通知給 {} 位團員", participants.size());
+        BusinessLog.info(log, "已發送合購單取消通知給 {} 位團員", participants.size());
     }
 
     // 🌟 專屬：合購單結案，通知大家去互給評價！
@@ -71,7 +72,7 @@ public class NotificationService {
             sendNotification(p.getUser(), "CAMPAIGN_COMPLETED", campaignId, participantContent);
         }
 
-        log.info("合購單 {} 結案推播發送完畢，共計通知 {} 位團員與 1 位團主", campaignId, participants.size());
+        BusinessLog.info(log, "合購單 {} 結案推播發送完畢，共計通知 {} 位團員與 1 位團主", campaignId, participants.size());
     }
 
     public void sendNotification(User user, String type, Long refId, String content) {
@@ -83,11 +84,19 @@ public class NotificationService {
                 .content(content)
                 .isRead(false)
                 .build();
-        notificationRepository.save(notification);
+        long startedAt = System.nanoTime();
+        try {
+            notificationRepository.save(notification);
+        } catch (RuntimeException e) {
+            log.error("event=NOTIFICATION_PERSIST_FAILED userId={} type={} refId={} errorType={}", user.getId(), type, refId, e.getClass().getSimpleName());
+            throw e;
+        }
+        BusinessLog.debug(log, "event=NOTIFICATION_CREATED notificationId={} userId={} type={} refId={}", notification.getId(), user.getId(), type, refId);
 
         // 🌟 透過 WebSocket 即時推播給該使用者的小鈴鐺
         // 這會發送到 /user/{userId}/queue/notifications 頻道
-        messagingTemplate.convertAndSendToUser(
+        try {
+            messagingTemplate.convertAndSendToUser(
                 user.getId().toString(),
                 "/queue/notifications",
                 Map.of(
@@ -97,6 +106,11 @@ public class NotificationService {
                         "referenceId", refId
                 )
         );
+            BusinessLog.debug(log, "event=NOTIFICATION_PUSH_SUBMITTED notificationId={} userId={} type={} refId={} durationMs={}", notification.getId(), user.getId(), type, refId, (System.nanoTime() - startedAt) / 1_000_000);
+        } catch (RuntimeException e) {
+            log.error("event=NOTIFICATION_PUSH_FAILED notificationId={} userId={} type={} refId={} errorType={}", notification.getId(), user.getId(), type, refId, e.getClass().getSimpleName());
+            throw e;
+        }
     }
 
 
@@ -153,7 +167,7 @@ public class NotificationService {
 
         // 呼叫底層推播方法
         sendNotification(targetUser, "NO_SHOW_WARNING", campaign.getId(), content);
-        log.info("已發送棄單警告通知給團員 {}", targetUser.getId());
+        BusinessLog.info(log, "已發送棄單警告通知給團員 {}", targetUser.getId());
     }
 
     // 🌟 專屬：通知團主有人提出仲裁，合購單凍結！
@@ -163,7 +177,7 @@ public class NotificationService {
 
         // 直接從 campaign 抓出 Host 來通知
         sendNotification(campaign.getHost(), "DISPUTE_RAISED", campaign.getId(), content);
-        log.info("已發送仲裁通知給團主 {}", campaign.getHost().getId());
+        BusinessLog.info(log, "已發送仲裁通知給團主 {}", campaign.getHost().getId());
     }
 
     // 對指定合購單聊天室廣播狀態變更事件
@@ -178,9 +192,14 @@ public class NotificationService {
 
         // 廣播到該合購單的專屬 Topic (所有訂閱此頻道的連線都會收到)
         String destination = "/topic/campaigns/" + campaignId;
-        messagingTemplate.convertAndSend(destination, payload);
+        try {
+            messagingTemplate.convertAndSend(destination, payload);
+        } catch (RuntimeException e) {
+            log.error("event=CAMPAIGN_STATUS_BROADCAST_FAILED campaignId={} status={} errorType={}", campaignId, status, e.getClass().getSimpleName());
+            throw e;
+        }
 
-        log.info("已向聊天室 {} 廣播狀態變更: {}", campaignId, status);
+        BusinessLog.info(log, "已向聊天室 {} 廣播狀態變更: {}", campaignId, status);
     }
 
     public void broadcastChatAccessRevoked(Long campaignId, Long userId, String reason) {
@@ -191,9 +210,14 @@ public class NotificationService {
                 "userId", userId,
                 "reason", reason
         );
-        messagingTemplate.convertAndSend("/topic/campaigns/" + campaignId, payload);
-        messagingTemplate.convertAndSendToUser(userId.toString(), "/queue/chat-access", payload);
-        log.info("已撤銷使用者 {} 對聊天室 {} 的即時存取權", userId, campaignId);
+        try {
+            messagingTemplate.convertAndSend("/topic/campaigns/" + campaignId, payload);
+            messagingTemplate.convertAndSendToUser(userId.toString(), "/queue/chat-access", payload);
+        } catch (RuntimeException e) {
+            log.error("event=CHAT_ACCESS_REVOCATION_PUSH_FAILED campaignId={} userId={} errorType={}", campaignId, userId, e.getClass().getSimpleName());
+            throw e;
+        }
+        BusinessLog.info(log, "已撤銷使用者 {} 對聊天室 {} 的即時存取權", userId, campaignId);
     }
 
 }

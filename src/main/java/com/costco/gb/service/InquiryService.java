@@ -1,11 +1,13 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.CreateInquiryAnswerRequest;
 import com.costco.gb.dto.request.CreateInquiryRequest;
 import com.costco.gb.dto.response.*;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -27,6 +29,7 @@ import java.util.Set;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InquiryService {
@@ -158,6 +161,7 @@ public class InquiryService {
                 .expireTime(TYPE_STOCK.equals(type) ? LocalDateTime.now().plusDays(14) : null)
                 .build();
         Inquiry saved = inquiryRepository.save(inquiry);
+        BusinessLog.info(log, "event=INQUIRY_CREATED actorId={} inquiryId={} type={} storeId={} imageCount={} expiresAt={}", userId, saved.getId(), type, request.getStoreId(), imageUrls.size(), saved.getExpireTime());
         return getDetail(saved.getId(), userId);
     }
 
@@ -179,6 +183,7 @@ public class InquiryService {
 
         // 新回答通知發問者與關注者，並以使用者 ID 去重及排除回答者本人。
         notifyNewAnswer(inquiry, answer);
+        BusinessLog.info(log, "event=INQUIRY_ANSWER_CREATED actorId={} inquiryId={} answerId={} storeId={}", userId, inquiryId, answer.getId(), request.getStoreId());
         return toAnswerResponse(answer);
     }
 
@@ -201,7 +206,9 @@ public class InquiryService {
         answer.setContent(content);
 
         // 立即 flush，確保回應中的 updatedAt 為本次編輯的時間。
-        return toAnswerResponse(inquiryAnswerRepository.saveAndFlush(answer));
+        InquiryAnswer saved = inquiryAnswerRepository.saveAndFlush(answer);
+        BusinessLog.info(log, "event=INQUIRY_ANSWER_UPDATED actorId={} inquiryId={} answerId={} storeId={}", userId, inquiryId, answerId, request.getStoreId());
+        return toAnswerResponse(saved);
     }
 
     @Transactional
@@ -233,6 +240,7 @@ public class InquiryService {
                 TYPE_STOCK, STATUS_OPEN, LocalDateTime.now());
         for (Inquiry inquiry : expiredInquiries) {
             inquiry.setStatus(STATUS_EXPIRED);
+            BusinessLog.info(log, "event=INQUIRY_EXPIRED actor=SYSTEM inquiryId={} beforeStatus=OPEN afterStatus=EXPIRED", inquiry.getId());
 
             // 僅在有效期限內完全沒有回答時，通知發問者與所有關注者。
             if (!inquiryAnswerRepository.existsByInquiryId(inquiry.getId())) {
@@ -249,6 +257,7 @@ public class InquiryService {
         recipientIds.remove(answer.getUser().getId());
 
         String content = "你關注的問題有新的回答：「" + inquiry.getTitle() + "」";
+        BusinessLog.info(log, "event=INQUIRY_NOTIFICATION_BATCH inquiryId={} recipientCount={}", inquiry.getId(), recipientIds.size());
         for (Long recipientId : recipientIds) {
             notificationService.sendNotification(findUser(recipientId), "INQUIRY_NEW_ANSWER", inquiry.getId(), content);
         }
@@ -261,6 +270,7 @@ public class InquiryService {
                 .forEach(follow -> recipientIds.add(follow.getUser().getId()));
 
         String content = "你關注的問題已到期且尚未收到回答：「" + inquiry.getTitle() + "」";
+        BusinessLog.info(log, "event=INQUIRY_NOTIFICATION_BATCH inquiryId={} recipientCount={}", inquiry.getId(), recipientIds.size());
         for (Long recipientId : recipientIds) {
             notificationService.sendNotification(findUser(recipientId), "INQUIRY_EXPIRED_NO_ANSWER", inquiry.getId(), content);
         }

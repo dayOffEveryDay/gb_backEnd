@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.UserDeliveryProfileRequest;
 import com.costco.gb.dto.response.UserDeliveryProfileResponse;
 import com.costco.gb.entity.User;
@@ -51,7 +52,7 @@ public class UserDeliveryProfileService {
         profile.setUser(user);
         applyRequest(profile, request);
         UserDeliveryProfile saved = profileRepository.save(profile);
-        log.info("使用者 {} 已新增常用交付資料 {}，類型: {}", userId, saved.getId(), saved.getProfileType());
+        BusinessLog.info(log, "event=USER_DELIVERY_PROFILE_CREATED actorId={} profileId={} profileType={}", userId, saved.getId(), saved.getProfileType());
         return toResponse(saved);
     }
 
@@ -61,7 +62,7 @@ public class UserDeliveryProfileService {
         UserDeliveryProfile profile = getOwnedProfile(userId, profileId);
         applyRequest(profile, request);
         UserDeliveryProfile saved = profileRepository.save(profile);
-        log.info("使用者 {} 已修改常用交付資料 {}，類型: {}", userId, profileId, saved.getProfileType());
+        BusinessLog.info(log, "event=USER_DELIVERY_PROFILE_UPDATED actorId={} profileId={} profileType={}", userId, profileId, saved.getProfileType());
         return toResponse(saved);
     }
 
@@ -71,7 +72,7 @@ public class UserDeliveryProfileService {
         // 保留託購快照內容，只清除來源追蹤關聯，行為與資料庫 ON DELETE SET NULL 一致。
         deliveryDetailRepository.clearSourceProfile(profileId);
         profileRepository.delete(profile);
-        log.info("使用者 {} 已刪除常用交付資料 {}，類型: {}", userId, profileId, profile.getProfileType());
+        BusinessLog.info(log, "event=USER_DELIVERY_PROFILE_DELETED actorId={} profileId={} profileType={}", userId, profileId, profile.getProfileType());
     }
 
     private UserDeliveryProfile getOwnedProfile(Long userId, Long profileId) {

@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.PurchaseQuoteRequest;
 import com.costco.gb.dto.response.PurchaseOrderResponse;
 import com.costco.gb.dto.response.PurchaseQuoteResponse;
@@ -15,6 +16,7 @@ import com.costco.gb.repository.PurchaseQuoteRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -28,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseQuoteService {
@@ -68,6 +71,7 @@ public class PurchaseQuoteService {
                 .status(ACTIVE)
                 .build();
         quoteRepository.save(quote);
+        BusinessLog.info(log, "event=PURCHASE_QUOTE_CREATED actorId={} requestId={} quoteId={} amount={} beforeRequestStatus={} afterRequestStatus=QUOTING", userId, requestId, quote.getId(), quote.getQuoteAmount(), purchaseRequest.getStatus());
 
         if ("OPEN".equals(purchaseRequest.getStatus())) {
             purchaseRequest.setStatus("QUOTING");
@@ -115,9 +119,12 @@ public class PurchaseQuoteService {
         validateActiveQuote(quote);
         validateQuoteableRequest(purchaseRequest);
 
+        Integer beforeAmount = quote.getQuoteAmount();
         quote.setQuoteAmount(request.getQuoteAmount());
         quote.setQuoteNote(request.getQuoteNote());
-        return toQuoteResponse(quoteRepository.save(quote));
+        PurchaseQuote saved = quoteRepository.save(quote);
+        BusinessLog.info(log, "event=PURCHASE_QUOTE_UPDATED actorId={} requestId={} quoteId={} beforeAmount={} afterAmount={}", userId, purchaseRequest.getId(), quoteId, beforeAmount, quote.getQuoteAmount());
+        return toQuoteResponse(saved);
     }
 
     @Transactional
@@ -131,6 +138,7 @@ public class PurchaseQuoteService {
             throw new RuntimeException("委託單已成立訂單，無法撤回報價");
         }
 
+        String beforeRequestStatus = purchaseRequest.getStatus();
         quote.setStatus("WITHDRAWN");
         quote.setWithdrawnAt(LocalDateTime.now());
         quoteRepository.save(quote);
@@ -141,6 +149,7 @@ public class PurchaseQuoteService {
             purchaseRequest.setStatus("OPEN");
             purchaseRequestRepository.save(purchaseRequest);
         }
+        BusinessLog.info(log, "event=PURCHASE_QUOTE_WITHDRAWN actorId={} requestId={} quoteId={} beforeStatus=ACTIVE afterStatus=WITHDRAWN beforeRequestStatus={} afterRequestStatus={}", userId, purchaseRequest.getId(), quoteId, beforeRequestStatus, purchaseRequest.getStatus());
         return toQuoteResponse(quote);
     }
 
@@ -171,6 +180,7 @@ public class PurchaseQuoteService {
         purchaseRequestRepository.save(purchaseRequest);
         quoteRepository.save(quote);
         quoteRepository.markOtherActiveQuotesNotSelected(purchaseRequest.getId(), quoteId);
+        BusinessLog.info(log, "event=PURCHASE_QUOTE_SELECTED actorId={} requestId={} quoteId={} orderId={} runnerId={} amount={} notSelectedCount={}", userId, purchaseRequest.getId(), quoteId, order.getId(), quote.getQuoter().getId(), quote.getQuoteAmount(), notSelectedQuotes.size());
         recordOrderEvent(order, purchaseRequest.getRequester(), "ORDER_CREATED_FROM_QUOTE");
 
         notificationService.sendNotification(
@@ -210,6 +220,7 @@ public class PurchaseQuoteService {
         purchaseRequest.setStatus("ORDERED");
         purchaseRequestRepository.save(purchaseRequest);
         recordOrderEvent(order, runner, "ORDER_CREATED_BY_ACCEPT");
+        BusinessLog.info(log, "event=PURCHASE_FIXED_REQUEST_ACCEPTED actorId={} requestId={} orderId={} amount={}", userId, requestId, order.getId(), purchaseRequest.getFixedRewardAmount());
 
         notificationService.sendNotification(
                 purchaseRequest.getRequester(),
@@ -251,6 +262,7 @@ public class PurchaseQuoteService {
                 .description("託購訂單已成立")
                 .build();
         orderEventRepository.save(event);
+        BusinessLog.info(log, "event={} actorId={} requestId={} orderId={} afterStatus=WAITING_CONFIRMATION", eventType, actor.getId(), order.getPurchaseRequest().getId(), order.getId());
     }
 
     private void validateQuoteableRequest(PurchaseRequest purchaseRequest) {

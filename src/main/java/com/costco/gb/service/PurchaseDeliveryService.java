@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.response.PurchaseRequestDeliveryDetailResponse;
 import com.costco.gb.entity.PurchaseRequest;
 import com.costco.gb.entity.PurchaseRequestDeliveryDetail;
@@ -7,6 +8,7 @@ import com.costco.gb.entity.UserDeliveryProfile;
 import com.costco.gb.repository.PurchaseRequestDeliveryDetailRepository;
 import com.costco.gb.repository.UserDeliveryProfileRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseDeliveryService {
@@ -61,6 +64,7 @@ public class PurchaseDeliveryService {
         }
         detailRepository.deleteByPurchaseRequestId(request.getId());
         detailRepository.saveAll(snapshots);
+        BusinessLog.info(log, "event=PURCHASE_DELIVERY_SNAPSHOTS_REPLACED actorId={} requestId={} profileIds={} deliveryMethod={} count={}", request.getRequester().getId(), request.getId(), ids, request.getDeliveryMethod(), snapshots.size());
     }
 
     @Transactional(readOnly = true)

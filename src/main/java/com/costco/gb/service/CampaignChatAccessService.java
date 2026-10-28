@@ -5,6 +5,7 @@ import com.costco.gb.entity.Participant;
 import com.costco.gb.repository.CampaignRepository;
 import com.costco.gb.repository.ParticipantRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.Set;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CampaignChatAccessService {
@@ -82,6 +84,7 @@ public class CampaignChatAccessService {
 
     public void requireReadable(Campaign campaign, Long userId) {
         if (getAccessLevel(campaign, userId) == AccessLevel.NONE) {
+            log.warn("event=CAMPAIGN_CHAT_ACCESS_DENIED actorId={} campaignId={} operation=READ reasonCode=NOT_MEMBER", userId, campaign.getId());
             throw new RuntimeException("您不是此合購單的有效成員，無法查看聊天紀錄！");
         }
     }
@@ -89,9 +92,11 @@ public class CampaignChatAccessService {
     public void requireWritable(Campaign campaign, Long userId) {
         AccessLevel accessLevel = getAccessLevel(campaign, userId);
         if (accessLevel == AccessLevel.NONE) {
+            log.warn("event=CAMPAIGN_CHAT_ACCESS_DENIED actorId={} campaignId={} operation=WRITE reasonCode=NOT_MEMBER", userId, campaign.getId());
             throw new RuntimeException("您不是此合購單的有效成員，無法發言！");
         }
         if (accessLevel == AccessLevel.READ_ONLY) {
+            log.warn("event=CAMPAIGN_CHAT_ACCESS_DENIED actorId={} campaignId={} operation=WRITE reasonCode=READ_ONLY", userId, campaign.getId());
             throw new RuntimeException("此聊天室目前為唯讀狀態，無法發言！");
         }
     }

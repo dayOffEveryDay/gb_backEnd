@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.CreateReviewRequest;
 import com.costco.gb.dto.response.ReviewResponse;
 import com.costco.gb.dto.response.ReviewStatusResponse;
@@ -80,7 +81,7 @@ public class ReviewService {
                 scoreChange = 0;
                 isCounted = false;
                 logReason = "收到 5 星評價 (觸發 7 天防刷單機制，不予加分)";
-                log.info("防刷單觸發：User {} 在 7 天內已對 User {} 給過加分評價", reviewerId, reviewee.getId());
+                BusinessLog.info(log, "防刷單觸發：User {} 在 7 天內已對 User {} 給過加分評價", reviewerId, reviewee.getId());
             } else {
                 isCounted = true; // 放行！
             }
@@ -101,7 +102,8 @@ public class ReviewService {
 
         // 6. 如果分數有實質變動，才去更新會員分數與信用存摺
         if (scoreChange != 0) {
-            int newScore = Math.max(0, Math.min(100, reviewee.getCreditScore() + scoreChange));
+            int beforeScore = reviewee.getCreditScore();
+            int newScore = Math.max(0, Math.min(100, beforeScore + scoreChange));
             reviewee.setCreditScore(newScore);
             userRepository.save(reviewee);
 
@@ -114,9 +116,10 @@ public class ReviewService {
                     .build();
             creditScoreLogRepository.save(scoreLog);
 
-            log.info("User {} 信用分數變更 {}。目前信用分數: {}",
-                    reviewee.getId(), scoreChange, newScore);
+            BusinessLog.info(log, "event=REVIEW_CREDIT_CHANGED actorId={} userId={} campaignId={} reviewId={} requestedChange={} beforeScore={} afterScore={} actualChange={}",
+                    reviewerId, reviewee.getId(), campaign.getId(), review.getId(), scoreChange, beforeScore, newScore, newScore - beforeScore);
         }
+        BusinessLog.info(log, "event=CAMPAIGN_REVIEW_CREATED actorId={} revieweeId={} campaignId={} reviewId={} rating={} scoreCounted={}", reviewerId, reviewee.getId(), campaign.getId(), review.getId(), request.getRating(), isCounted);
     }
 
     // 查詢目前使用者對指定交易的評價狀態

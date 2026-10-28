@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.ChatMessageRequest;
 import com.costco.gb.dto.response.ChatMessageResponse;
 import com.costco.gb.entity.*;
@@ -35,7 +36,13 @@ public class ChatService {
                 .content(request.getContent())
                 .messageType("TEXT")
                 .build();
-        chatMessageRepository.save(message);
+        try {
+            chatMessageRepository.save(message);
+        } catch (RuntimeException e) {
+            log.error("event=CAMPAIGN_CHAT_PERSIST_FAILED actorId={} campaignId={} errorType={}", senderId, campaignId, e.getClass().getSimpleName());
+            throw e;
+        }
+        BusinessLog.debug(log, "event=CAMPAIGN_CHAT_MESSAGE_SAVED actorId={} campaignId={} messageId={} messageType=TEXT", senderId, campaignId, message.getId());
 
         return ChatMessageResponse.builder()
                 .senderId(sender.getId())

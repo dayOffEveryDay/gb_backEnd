@@ -35,7 +35,7 @@ public class ChatRoomInterceptor implements ChannelInterceptor {
                 // 檢查使用者是否具有進入聊天室的權限
                 Principal userPrincipal = accessor.getUser();
                 if (userPrincipal == null) {
-                    log.warn("拒絕連線！找不到 WebSocket 使用者身分。");
+                    log.warn("event=CHAT_SUBSCRIPTION_REJECTED sessionId={} reasonCode=UNAUTHENTICATED", accessor.getSessionId());
                     throw new IllegalArgumentException("未授權的連線！");
                 }
 
@@ -45,16 +45,20 @@ public class ChatRoomInterceptor implements ChannelInterceptor {
                 // 即時訂閱只提供可讀寫聊天室；唯讀紀錄改由 REST 歷史訊息 API 取得。
                 if (campaignChatAccessService.getAccessLevel(campaignId, currentUserId)
                         != CampaignChatAccessService.AccessLevel.READ_WRITE) {
-                    log.warn("拒絕使用者 {} 訂閱合購單 {} 聊天室", currentUserId, campaignId);
+                    log.warn("event=CAMPAIGN_CHAT_SUBSCRIPTION_REJECTED actorId={} campaignId={} reasonCode=NO_WRITE_ACCESS", currentUserId, campaignId);
                     throw new IllegalArgumentException("此聊天室目前無法訂閱。");
                 }
             }
             if (destination != null && destination.startsWith("/topic/chat/rooms/")) {
                 Principal principal = accessor.getUser();
-                if (principal == null) throw new IllegalArgumentException("未授權的連線");
+                if (principal == null) {
+                    log.warn("event=CHAT_SUBSCRIPTION_REJECTED sessionId={} reasonCode=UNAUTHENTICATED", accessor.getSessionId());
+                    throw new IllegalArgumentException("未授權的連線");
+                }
                 Long roomId = extractCampaignId(destination);
                 Long userId = Long.parseLong(principal.getName());
                 if (purchaseChatRoomMemberRepository.findByRoomIdAndUserId(roomId, userId).isEmpty()) {
+                    log.warn("event=PURCHASE_CHAT_SUBSCRIPTION_REJECTED actorId={} roomId={} reasonCode=NOT_MEMBER", userId, roomId);
                     throw new IllegalArgumentException("您不是此託購聊天室成員");
                 }
             }

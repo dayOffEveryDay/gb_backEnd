@@ -1,15 +1,18 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.CreatePurchaseOrderReviewRequest;
 import com.costco.gb.dto.response.PurchaseOrderReviewResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
+@Slf4j
 @Service @RequiredArgsConstructor
 public class PurchaseOrderReviewService {
     private final PurchaseOrderRepository orderRepository;
@@ -38,6 +41,7 @@ public class PurchaseOrderReviewService {
         if (change > 0 && reviewRepository.existsByReviewerIdAndRevieweeIdAndIsScoreCountedTrueAndCreatedAtAfter(
                 reviewer.getId(), reviewee.getId(), LocalDateTime.now().minusDays(7))) {
             change = 0; counted = false;
+            BusinessLog.info(log, "event=PURCHASE_REVIEW_SCORE_SUPPRESSED actorId={} revieweeId={} orderId={} reasonCode=RECENT_POSITIVE_REVIEW", userId, reviewee.getId(), orderId);
         }
         PurchaseOrderReview review = reviewRepository.save(PurchaseOrderReview.builder()
                 .purchaseOrder(order).reviewer(reviewer).reviewee(reviewee).rating(rating)
@@ -46,7 +50,9 @@ public class PurchaseOrderReviewService {
             int score = reviewee.getCreditScore() == null ? 100 : reviewee.getCreditScore();
             reviewee.setCreditScore(Math.max(0, Math.min(100, score + change)));
             userRepository.save(reviewee);
+            BusinessLog.info(log, "event=PURCHASE_REVIEW_CREDIT_CHANGED actorId={} userId={} orderId={} reviewId={} beforeScore={} afterScore={} actualChange={}", userId, reviewee.getId(), orderId, review.getId(), score, reviewee.getCreditScore(), reviewee.getCreditScore() - score);
         }
+        BusinessLog.info(log, "event=PURCHASE_REVIEW_CREATED actorId={} revieweeId={} orderId={} reviewId={} rating={} scoreCounted={}", userId, reviewee.getId(), orderId, review.getId(), rating, counted);
         return response(review);
     }
 

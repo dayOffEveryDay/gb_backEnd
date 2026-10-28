@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.CancelPurchaseOrderRequest;
 import com.costco.gb.dto.request.ItemUnavailableRequest;
 import com.costco.gb.dto.request.ReportPurchaseOrderAbnormalRequest;
@@ -21,6 +22,7 @@ import com.costco.gb.repository.PurchaseQuoteRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import com.costco.gb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -37,6 +39,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseOrderService {
@@ -223,7 +226,7 @@ public class PurchaseOrderService {
 
         String fromStatus = order.getStatus();
         int penalty = "IN_PROGRESS".equals(fromStatus) ? 10 : 2;
-        applyPenalty(order.getRequester(), penalty);
+        applyPenalty(order, order.getRequester(), penalty, "REQUESTER_CANCEL");
         closePenalizedOrder(order, order.getRequester(), "REQUESTER_CANCEL", penalty);
 
         // 已開始處理的委託不再重新募集；處理前取消仍可在原期限內重新開放。
@@ -255,7 +258,7 @@ public class PurchaseOrderService {
 
         String fromStatus = order.getStatus();
         int penalty = "WAITING_CONFIRMATION".equals(fromStatus) ? 2 : 10;
-        applyPenalty(order.getRunner(), penalty);
+        applyPenalty(order, order.getRunner(), penalty, "RUNNER_CANCEL");
         closePenalizedOrder(order, order.getRunner(), "RUNNER_CANCEL", penalty);
         reopenOrExpireRequest(order.getPurchaseRequest(), "RUNNER_CANCEL", true);
 
@@ -470,7 +473,7 @@ public class PurchaseOrderService {
             }
 
             String fromStatus = order.getStatus();
-            applyPenalty(blamedUser, 10);
+            applyPenalty(order, blamedUser, 10, "ABNORMAL_NO_RESPONSE");
             order.setStatus("PENALIZED_CANCELLED");
             order.setBlameUser(blamedUser);
             order.setCreditPenalty(10);
@@ -510,7 +513,7 @@ public class PurchaseOrderService {
                 blame = order.getRequester(); penalty = 2;
             }
             if (penalty > 0) {
-                applyPenalty(blame, penalty);
+                applyPenalty(order, blame, penalty, "CONFIRMATION_TIMEOUT");
                 closePenalizedOrder(order, blame, "CONFIRMATION_TIMEOUT", penalty);
             } else {
                 order.setStatus("CANCELLED");
@@ -567,13 +570,16 @@ public class PurchaseOrderService {
         order.setCancelledAt(LocalDateTime.now());
     }
 
-    private void applyPenalty(User user, int penalty) {
+    private void applyPenalty(PurchaseOrder order, User user, int penalty, String reasonCode) {
         int currentScore = user.getCreditScore() == null ? 100 : user.getCreditScore();
         user.setCreditScore(Math.max(0, currentScore - penalty));
         userRepository.save(user);
+        BusinessLog.info(log, "event=PURCHASE_CREDIT_PENALTY orderId={} userId={} reasonCode={} requestedPenalty={} beforeScore={} afterScore={} actualChange={}",
+                order.getId(), user.getId(), reasonCode, penalty, currentScore, user.getCreditScore(), user.getCreditScore() - currentScore);
     }
 
     private void reopenOrExpireRequest(PurchaseRequest purchaseRequest, String reason, boolean reopen) {
+        String beforeStatus = purchaseRequest.getStatus();
         if (reopen && purchaseRequest.getRequestExpireTime().isAfter(LocalDateTime.now())) {
             purchaseRequest.setStatus("OPEN");
             purchaseRequest.setReopenCount((purchaseRequest.getReopenCount() == null ? 0 : purchaseRequest.getReopenCount()) + 1);
@@ -583,6 +589,7 @@ public class PurchaseOrderService {
             purchaseRequest.setExpiredAt(LocalDateTime.now());
         }
         purchaseRequestRepository.save(purchaseRequest);
+        BusinessLog.info(log, "event=PURCHASE_REQUEST_STATUS_CHANGED requestId={} reasonCode={} beforeStatus={} afterStatus={}", purchaseRequest.getId(), reason, beforeStatus, purchaseRequest.getStatus());
     }
 
     private void recordEvent(
@@ -602,6 +609,8 @@ public class PurchaseOrderService {
                 .metadata(metadata)
                 .build();
         orderEventRepository.save(event);
+        BusinessLog.info(log, "event={} actorId={} actorType={} requestId={} orderId={} beforeStatus={} afterStatus={} requestStatus={} abnormalType={}",
+                eventType, actor == null ? null : actor.getId(), actor == null ? "SYSTEM" : "USER", order.getPurchaseRequest().getId(), order.getId(), fromStatus, toStatus, order.getPurchaseRequest().getStatus(), order.getAbnormalType());
     }
 
     private void recordDetailedEvent(
@@ -623,6 +632,8 @@ public class PurchaseOrderService {
                 .metadata(metadata)
                 .build();
         orderEventRepository.save(event);
+        BusinessLog.info(log, "event={} actorId={} actorType={} requestId={} orderId={} beforeStatus={} afterStatus={} requestStatus={} abnormalType={}",
+                eventType, actor == null ? null : actor.getId(), actor == null ? "SYSTEM" : "USER", order.getPurchaseRequest().getId(), order.getId(), fromStatus, toStatus, order.getPurchaseRequest().getStatus(), order.getAbnormalType());
     }
 
     private void notify(User user, String type, PurchaseOrder order, String content) {

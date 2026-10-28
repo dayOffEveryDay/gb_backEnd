@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.CreateCampaignRequest;
 import com.costco.gb.dto.request.ReviseCampaignRequest;
 import com.costco.gb.dto.request.ReviseHostQuantityRequest;
@@ -151,17 +152,20 @@ public class CampaignService {
             userRepository.save(host);
             // TODO: V2 進階版，我們要在這裡把 availableQuantity 寫入 Redis，準備迎接高併發搶單！
             // (未來實作提示：redisTemplate.opsForValue().set("campaign:stock:" + campaign.getId(), String.valueOf(campaign.getAvailableQuantity())); )
-            log.info("User {} 成功發起了合購單: {}", hostId, campaign.getItemName());
+            BusinessLog.info(log, "event=CAMPAIGN_CREATED actorId={} campaignId={} status={} totalQuantity={} availableQuantity={}", hostId, campaign.getId(), campaign.getStatus(), campaign.getTotalQuantity(), campaign.getAvailableQuantity());
 
         } catch (Exception e) {
             // 建單失敗時清除本次已寫入的圖片，避免留下無對應資料的檔案
+            int cleanupFailures = 0;
             for (String fileName : savedFileNames) {
                 File fileToDelete = new File(UPLOAD_DIR + fileName);
                 if (fileToDelete.exists()) {
-                    fileToDelete.delete();
+                    if (!fileToDelete.delete()) {
+                        cleanupFailures++;
+                    }
                 }
             }
-            log.error("建單發生錯誤，已清理殘留的圖片檔案: {}", e.getMessage());
+            log.error("event=CAMPAIGN_CREATE_FAILED actorId={} writtenFileCount={} cleanupFailureCount={} errorType={}", hostId, savedFileNames.size(), cleanupFailures, e.getClass().getSimpleName());
             throw new RuntimeException("發起合購單失敗：" + e.getMessage());
         }
     }
@@ -200,7 +204,7 @@ public class CampaignService {
         campaign.setImageUrls(joinedUrls);
         campaignRepository.save(campaign);
 
-        log.info("合購單 {} 圖片順序已更新: {}", campaignId, joinedUrls);
+        BusinessLog.info(log, "event=CAMPAIGN_IMAGES_REORDERED actorId={} campaignId={} count={}", userId, campaignId, newImageUrls.size());
     }
 
     // 🌟 查詢我發起的合購單
@@ -264,6 +268,8 @@ public class CampaignService {
 
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         // 🛡️ 防護 1：驗證身分，只有團主本人可以改！
         if (!campaign.getHost().getId().equals(hostId)) {
@@ -300,13 +306,14 @@ public class CampaignService {
         // 如果修改後剛好剩餘數量變成 0，自動觸發滿單！
         if (newAvailableQuantity == 0) {
             campaign.setStatus("FULL");
-            log.info("合購單 {} 因團主修改數量，觸發滿單狀態！", campaignId);
+            BusinessLog.info(log, "合購單 {} 因團主修改數量，觸發滿單狀態！", campaignId);
             // 這裡可以呼叫 notificationService.notifyCampaignFull(campaign);
         }
 
         campaignRepository.save(campaign);
-        log.info("團主 {} 成功修改合購單 {} 的數量配置。新自留: {}, 新開放: {}",
+        BusinessLog.info(log, "團主 {} 成功修改合購單 {} 的數量配置。新自留: {}, 新開放: {}",
                 hostId, campaignId, newCalculatedReserved, request.getNewOpenQuantity());
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=reviseCampaignByHost actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", hostId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
 
@@ -363,6 +370,8 @@ public class CampaignService {
         // 1. 驗證合購單狀態、期限及認購資格
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         if (!"OPEN".equals(campaign.getStatus())) {
             throw new RuntimeException("手腳太慢啦！此合購單已滿單或關閉。");
@@ -401,14 +410,14 @@ public class CampaignService {
                 existingParticipant.setStatus("JOINED");
                 existingParticipant.setQuantity(request.getQuantity()); // 數量不累加，直接覆蓋成這次要求的新數量
 
-                log.info("User {} 重新加入了合購單 {} (從 {} 狀態復活)，數量: {}",
+                BusinessLog.info(log, "User {} 重新加入了合購單 {} (從 {} 狀態復活)，數量: {}",
                         userId, campaignId, currentStatus, request.getQuantity());
             }
             // 已在團內的參與者再次認購時累加數量
             else if ("JOINED".equals(currentStatus)) {
                 existingParticipant.setQuantity(existingParticipant.getQuantity() + request.getQuantity());
 
-                log.info("User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
+                BusinessLog.info(log, "User {} 在合購單 {} 追加了數量: {}，目前總共認購: {}",
                         userId, campaignId, request.getQuantity(), existingParticipant.getQuantity());
             }
 
@@ -428,17 +437,18 @@ public class CampaignService {
             user.setTotalJoinedCount(incrementCount(user.getTotalJoinedCount()));
             userRepository.save(user);
 
-            log.info("User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
+            BusinessLog.info(log, "User {} 首次認購了合購單 {}，數量: {}", userId, campaignId, request.getQuantity());
         }
 
         // 4. 剩餘數量歸零時將合購單標記為滿單
         if (campaign.getAvailableQuantity() == 0) {
             campaign.setStatus("FULL");
-            log.info("合購單 {} 已達滿單狀態！", campaignId);
+            BusinessLog.info(log, "合購單 {} 已達滿單狀態！", campaignId);
             // 滿單後通知團主與參與者
             notificationService.notifyCampaignFull(campaign);
             // 交易提交時由 Hibernate dirty checking 更新狀態
         }
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=joinCampaign actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", userId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
     // 🌟 團主專用：踢除裝死或惡意團員
@@ -446,6 +456,8 @@ public class CampaignService {
     public void kickParticipant(Long hostId, Long campaignId, Long targetUserId, String reason) {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         if (!campaign.getHost().getId().equals(hostId)) {
             throw new RuntimeException("只有團主可以踢人！");
@@ -483,7 +495,8 @@ public class CampaignService {
                 "您已被團主移出合購單「" + campaign.getItemName() + "」。");
         notificationService.broadcastChatAccessRevoked(campaignId, targetUserId, "KICKED");
 
-        log.info("團主 {} 踢除了團員 {}，釋出 {} 份，合購單 {} 退回 OPEN 狀態", hostId, targetUserId, freedQuantity, campaignId);
+        BusinessLog.info(log, "團主 {} 踢除了團員 {}，釋出 {} 份，合購單 {} 退回 OPEN 狀態", hostId, targetUserId, freedQuantity, campaignId);
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=kickParticipant actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", hostId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
     // 🌟 團主專用：滿單後開放團員修改數量/退出
@@ -491,6 +504,8 @@ public class CampaignService {
     public void unlockRevision(Long hostId, Long campaignId) {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         if (!campaign.getHost().getId().equals(hostId)) {
             throw new RuntimeException("權限不足！");
@@ -505,7 +520,7 @@ public class CampaignService {
         campaignRepository.save(campaign);
 
         // 🔔 (可選) 推播通知所有人：團主已開放修改權限！
-        log.info("合購單 {} 已由團主解鎖修改權限", campaignId);
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=unlockRevision actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", hostId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
 
@@ -519,6 +534,8 @@ public class CampaignService {
 
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         // 🛡️ 防護鎖：只有在 OPEN 或「被團主解鎖」的 FULL 狀態下可以改
         if (!"OPEN".equals(campaign.getStatus()) && !campaign.isAllowRevision()) {
@@ -550,11 +567,12 @@ public class CampaignService {
         if (currentAvailable > 0) {
             campaign.setStatus("OPEN");
             campaign.setAllowRevision(false);
-            log.info("合購單 {} 釋出名額，恢復為 OPEN 狀態，並關閉特權修改鎖！", campaignId);
+            BusinessLog.info(log, "合購單 {} 釋出名額，恢復為 OPEN 狀態，並關閉特權修改鎖！", campaignId);
         }
 
-        log.info("User {} 在合購單 {} 減少了數量: {}，目前總共認購: {}",
+        BusinessLog.info(log, "User {} 在合購單 {} 減少了數量: {}，目前總共認購: {}",
                 userId, campaignId, request.getQuantity(), newQuantity);
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=reviseCampaign actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", userId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
     @Transactional
@@ -567,6 +585,8 @@ public class CampaignService {
         // 2. 檢查合購單狀態
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         // 🛡️ 防護鎖
         if (!"OPEN".equals(campaign.getStatus()) && !campaign.isAllowRevision()) {
@@ -592,7 +612,7 @@ public class CampaignService {
         user.setParticipantCancelCount(incrementCount(user.getParticipantCancelCount()));
         userRepository.save(user);
 
-        log.info("User {} 成功退出了合購單 {}，釋放數量: {}，累積反悔次數: {}",
+        BusinessLog.info(log, "User {} 成功退出了合購單 {}，釋放數量: {}，累積反悔次數: {}",
                 userId, campaignId, participant.getQuantity(), user.getParticipantCancelCount());
 
         // 通知團主有參與者退出
@@ -600,6 +620,7 @@ public class CampaignService {
             "😢 團員已退出您的合購單「" + campaign.getItemName() + "」，目前已恢復招募狀態。");
         notificationService.broadcastChatAccessRevoked(campaignId, userId, "WITHDRAWN");
 
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=withdrawCampaign actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", userId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
     // ==========================================
@@ -609,6 +630,8 @@ public class CampaignService {
     public void deliverCampaign(Long userId, Long campaignId) {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         // 1. 權限檢查：只有團主可以按
         if (!campaign.getHost().getId().equals(userId)) {
@@ -629,7 +652,6 @@ public class CampaignService {
         // 4. 更改狀態
         campaign.setStatus("DELIVERED");
         campaignRepository.save(campaign);
-        log.info("團主 {} 已將合購單 {} 狀態更改為 DELIVERED (待團員確認收貨)", userId, campaignId);
 
         //  🌟 觸發 WebSocket 廣播事件到聊天室
         notificationService.broadcastCampaignStatus(
@@ -637,6 +659,7 @@ public class CampaignService {
                 "DELIVERED",
                 "主揪已發起面交"
         );
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=deliverCampaign actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", userId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
 
     // ==========================================
@@ -646,6 +669,8 @@ public class CampaignService {
     public void confirmReceipt(Long userId, Long campaignId) {
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
+        Integer beforeAvailableQuantity = campaign.getAvailableQuantity();
 
         // 1. 狀態檢查：團主必須先按了「已面交」
         if (!"DELIVERED".equals(campaign.getStatus())) {
@@ -663,7 +688,7 @@ public class CampaignService {
         // 3. 將該團員的明細狀態改為「已確認 (CONFIRMED)」
         participant.setStatus("CONFIRMED");
         participantRepository.save(participant);
-        log.info("團員 {} 已確認收到合購單 {} 的商品", userId, campaignId);
+        BusinessLog.info(log, "團員 {} 已確認收到合購單 {} 的商品", userId, campaignId);
 
         // 4. 🌟 終極判斷：是不是所有人都拿到了？
         // 我們去算還有沒有人的狀態停留在 'JOINED' (代表還沒按確認)
@@ -674,10 +699,11 @@ public class CampaignService {
             campaign.setStatus("COMPLETED");
             campaign.setCompletedAt(LocalDateTime.now());
             campaignRepository.save(campaign);
-            log.info("🎉 合購單 {} 的所有團員皆已確認收貨，訂單正式 COMPLETED！", campaignId);
+            BusinessLog.info(log, "🎉 合購單 {} 的所有團員皆已確認收貨，訂單正式 COMPLETED！", campaignId);
             notificationService.notifyReviewTime(campaign);
             notificationService.broadcastCampaignStatus(campaignId, "COMPLETED", "團購已完成，聊天室將保留 3 天");
         }
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=confirmReceipt actorId={} campaignId={} beforeStatus={} afterStatus={} beforeAvailableQuantity={} afterAvailableQuantity={}", userId, campaignId, beforeCampaignStatus, campaign.getStatus(), beforeAvailableQuantity, campaign.getAvailableQuantity());
     }
     // ==========================================
     // 👻 系統專用：處理團主人間蒸發的幽靈單
@@ -697,7 +723,8 @@ public class CampaignService {
 
             // 2. 嚴懲團主！重扣 10 分信用分
             User host = campaign.getHost();
-            int newScore = Math.max(0, host.getCreditScore() - 10);
+            int beforeScore = host.getCreditScore();
+            int newScore = Math.max(0, beforeScore - 10);
             host.setCreditScore(newScore);
             userRepository.save(host);
             // 3. 寫入信用存摺：幽靈放鳥
@@ -708,12 +735,13 @@ public class CampaignService {
                     .campaignId(campaign.getId())
                     .build();
             creditScoreLogRepository.save(csLog);
+            BusinessLog.info(log, "event=CAMPAIGN_CREDIT_PENALTY actor=SYSTEM userId={} campaignId={} reasonCode=HOST_NO_SHOW beforeScore={} afterScore={} actualChange={}", host.getId(), campaign.getId(), beforeScore, newScore, newScore - beforeScore);
             // 4. 🕊️ 真正釋放團員的地方！直接呼叫 Repository 的批次更新方法
             int releasedCount = participantRepository.cancelAllByCampaignId(campaign.getId());
             notificationService.broadcastCampaignStatus(
                     campaign.getId(), "HOST_NO_SHOW", "團購已由系統結束，聊天室改為唯讀");
 
-            log.warn("🚨 抓到幽靈團主！合購單 {} 強制結案。團主信用扣 10 分。共釋放了 {} 名無辜團員！",
+            BusinessLog.warn(log, "🚨 抓到幽靈團主！合購單 {} 強制結案。團主信用扣 10 分。共釋放了 {} 名無辜團員！",
                     campaign.getId(), releasedCount);
         }
 
@@ -728,6 +756,7 @@ public class CampaignService {
 
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
 
         // 🛡️ 防護 1：驗證身分
         if (!campaign.getHost().getId().equals(hostId)) {
@@ -743,7 +772,7 @@ public class CampaignService {
         List<Participant> activeParticipants = participantRepository.findByCampaignIdAndStatus(campaignId, "JOINED");
 
         if (!activeParticipants.isEmpty()) {
-            log.warn("團主 {} 取消了已有 {} 人上車的合購單 {}", hostId, activeParticipants.size(), campaignId);
+            BusinessLog.warn(log, "團主 {} 取消了已有 {} 人上車的合購單 {}", hostId, activeParticipants.size(), campaignId);
 
             // 1. 記錄取消責任人與原因
             campaign.setBlameUser(campaign.getHost());
@@ -775,7 +804,7 @@ public class CampaignService {
 
         campaignRepository.save(campaign);
         notificationService.broadcastCampaignStatus(campaignId, "CANCELLED", "團購已由團主取消，聊天室改為唯讀");
-        log.info("合購單 {} 已成功被團主 {} 取消。", campaignId, hostId);
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=cancelCampaignByHost actorId={} campaignId={} beforeStatus={} afterStatus={}", hostId, campaignId, beforeCampaignStatus, campaign.getStatus());
     }
 
 
@@ -819,6 +848,7 @@ public class CampaignService {
 
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
 
         // 🛡️ 防護 1：驗證操作者是不是這張單的團主
         if (!campaign.getHost().getId().equals(currentUserId)) {
@@ -843,10 +873,10 @@ public class CampaignService {
         targetUser.setNoShowCount(incrementCount(targetUser.getNoShowCount()));
         userRepository.save(targetUser);
 
-        log.info("🚨 團主 {} 已將團員 {} 標記為棄單 (合購單 {})", currentUserId, targetUserId, campaignId);
 
         // 🌟 觸發推播：警告團員已被標記棄單，提醒他有權利提出仲裁！
         notificationService.notifyUserNoShowWarning(participant.getUser(), campaign);
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=markParticipantAsNoShow actorId={} campaignId={} beforeStatus={} afterStatus={} targetUserId={} beforeParticipantStatus={} afterParticipantStatus={}", currentUserId, campaignId, beforeCampaignStatus, campaign.getStatus(), targetUserId, currentStatus, participant.getStatus());
     }
 
 
@@ -856,6 +886,7 @@ public class CampaignService {
 
         Campaign campaign = campaignRepository.findById(campaignId)
                 .orElseThrow(() -> new RuntimeException("找不到該合購單"));
+        String beforeCampaignStatus = campaign.getStatus();
 
         Participant participant = participantRepository.findByCampaignIdAndUserId(campaignId, currentUserId)
                 .orElseThrow(() -> new RuntimeException("找不到您的參團紀錄"));
@@ -875,10 +906,10 @@ public class CampaignService {
         participantRepository.save(participant);
 
         // 如果資料庫有開欄位，這裡可以把 reason (爭議原因) 存起來，或是自動發送一則系統訊息到該合購單的聊天室
-        log.info("⚖️ 團員 {} 對合購單 {} 提出仲裁！原因: {}", currentUserId, campaignId, reason);
 
         // 🌟 觸發推播：通知團主有人提出爭議了，訂單已凍結！
         notificationService.notifyHostAboutDispute(campaign);
+        BusinessLog.info(log, "event=CAMPAIGN_OPERATION_COMPLETED operation=raiseDispute actorId={} campaignId={} beforeStatus={} afterStatus={} beforeParticipantStatus={} afterParticipantStatus={}", currentUserId, campaignId, beforeCampaignStatus, campaign.getStatus(), currentStatus, participant.getStatus());
     }
 
     private int incrementCount(Integer currentCount) {

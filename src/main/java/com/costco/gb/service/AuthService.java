@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.LineLoginRequest;
 import com.costco.gb.dto.response.AuthResponse;
 import com.costco.gb.entity.RefreshToken;
@@ -48,6 +49,7 @@ public class AuthService {
     @Transactional
     public AuthResponse lineLogin(LineLoginRequest request) {
         // Step 1: 使用 LINE 授權碼換取 Access Token
+        long startedAt = System.nanoTime();
         String lineAccessToken = getLineAccessToken(request.getCode(), request.getRedirectUri());
 
         // Step 2: 使用 Access Token 取得使用者 Profile
@@ -85,7 +87,7 @@ public class AuthService {
                     .preferredCategoryIds(new ArrayList<>())
                     .build();
             userPreferenceRepository.save(preference);
-            log.info("New user registered with Line UID: {}", lineUid);
+            BusinessLog.info(log, "event=USER_REGISTERED userId={}", user.getId());
         }
 
         // Step 4: 產生短效 JWT Access Token
@@ -93,6 +95,7 @@ public class AuthService {
         // Step 4.2: 產生長效 Refresh Token 並保存到資料庫
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(user.getId());
         // Step 5: 回傳登入憑證與使用者基本資料
+        BusinessLog.info(log, "event=LOGIN_SUCCEEDED userId={} provider=LINE newUser={} durationMs={}", user.getId(), isNewUser, (System.nanoTime() - startedAt) / 1_000_000);
         return AuthResponse.builder()
                 .token(jwtToken)
                 .refreshToken(refreshToken.getToken()) // 前端用於換發新的 Access Token
@@ -105,9 +108,15 @@ public class AuthService {
                 .build();
     }
 
+    private Integer upstreamStatus(Exception exception) {
+        return exception instanceof org.springframework.web.client.RestClientResponseException response
+                ? response.getStatusCode().value() : null;
+    }
+
     // --- LINE API 呼叫輔助方法 ---
 
     private String getLineAccessToken(String code, String redirectUri) {
+        long startedAt = System.nanoTime();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
@@ -125,12 +134,13 @@ public class AuthService {
             ResponseEntity<Map> response = restTemplate.postForEntity(tokenUri, request, Map.class);
             return (String) response.getBody().get("access_token");
         } catch (Exception e) {
-            log.error("Failed to get Line Access Token: {}", e.getMessage());
+            log.warn("event=LOGIN_FAILED provider=LINE stage=TOKEN_EXCHANGE errorType={} upstreamStatus={} durationMs={}", e.getClass().getSimpleName(), upstreamStatus(e), (System.nanoTime() - startedAt) / 1_000_000);
             throw new RuntimeException("Line login failed at token exchange.");
         }
     }
 
     private Map<String, Object> getLineUserProfile(String accessToken) {
+        long startedAt = System.nanoTime();
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(accessToken);
 
@@ -140,7 +150,7 @@ public class AuthService {
             ResponseEntity<Map> response = restTemplate.exchange(userInfoUri, HttpMethod.GET, request, Map.class);
             return response.getBody();
         } catch (Exception e) {
-            log.error("Failed to get Line User Profile: {}", e.getMessage());
+            log.warn("event=LOGIN_FAILED provider=LINE stage=PROFILE_FETCH errorType={} upstreamStatus={} durationMs={}", e.getClass().getSimpleName(), upstreamStatus(e), (System.nanoTime() - startedAt) / 1_000_000);
             throw new RuntimeException("Line login failed at fetching profile.");
         }
     }

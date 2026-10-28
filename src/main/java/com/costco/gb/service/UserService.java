@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.request.UpdateProfileRequest;
 import com.costco.gb.dto.response.CampaignSummaryResponse;
 //import com.costco.gb.dto.response.CreditLogResponse;
@@ -45,7 +46,7 @@ public class UserService {
         // 3. 儲存進資料庫 (其實有 @Transactional 的加持，Hibernate 的 Dirty Checking 也會自動幫你 UPDATE)
         userRepository.save(user);
 
-        log.info("User {} updated profile", userId);
+        BusinessLog.info(log, "event=USER_PROFILE_UPDATED actorId={} changedFields={}", userId, request.getDisplayName() == null ? List.of() : List.of("displayName"));
     }
 
 //    @Transactional(readOnly = true)

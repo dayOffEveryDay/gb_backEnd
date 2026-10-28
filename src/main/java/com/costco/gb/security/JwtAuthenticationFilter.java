@@ -72,7 +72,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             // Token 過期或偽造等例外處理
             // 可以根據需求記錄 Log，或是透過 Response 寫回 401 狀態碼
-            logger.error("JWT Validation failed: " + e.getMessage());
+            logger.warn("event=JWT_VALIDATION_REJECTED reasonCode=INVALID_TOKEN errorType=" + e.getClass().getSimpleName());
         }
 
         // 7. 繼續執行下一個 Filter 或 Controller

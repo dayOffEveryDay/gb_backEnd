@@ -8,6 +8,8 @@ import com.costco.gb.security.JwtService;
 import com.costco.gb.service.AuthService;
 import com.costco.gb.service.RefreshTokenService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import com.costco.gb.logging.BusinessLog;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -50,12 +53,16 @@ public class AuthController {
                 .map(RefreshToken::getUser)
                 .map(user -> {
                     String newAccessToken = jwtService.generateToken(user.getId());
+                    BusinessLog.info(log, "event=TOKEN_REFRESH_SUCCEEDED userId={}", user.getId());
                     return ResponseEntity.ok(Map.of(
                             "token", newAccessToken,
                             "refreshToken", requestRefreshToken
                     ));
                 })
-                .orElseThrow(() -> new RuntimeException("Invalid refresh token."));
+                .orElseThrow(() -> {
+                    log.warn("event=TOKEN_REFRESH_REJECTED reasonCode=UNKNOWN_TOKEN");
+                    return new RuntimeException("Invalid refresh token.");
+                });
     }
 
     @GetMapping("/dev-login")
@@ -67,6 +74,7 @@ public class AuthController {
 
         // 開發環境用登入入口，方便直接取得測試用 token
         String token = jwtService.generateToken(userId);
+        log.warn("event=DEV_LOGIN_USED userId={}", userId);
         RefreshToken refreshToken = refreshTokenService.createRefreshToken(userId);
 
         return ResponseEntity.ok(Map.of(

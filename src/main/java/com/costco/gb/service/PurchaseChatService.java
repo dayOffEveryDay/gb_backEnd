@@ -1,10 +1,12 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.response.PurchaseChatMessageResponse;
 import com.costco.gb.dto.response.PurchaseChatRoomResponse;
 import com.costco.gb.entity.*;
 import com.costco.gb.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +15,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseChatService {
@@ -35,6 +38,7 @@ public class PurchaseChatService {
                     .purchaseOrder(order).status("ACTIVE").build());
             memberRepository.save(PurchaseChatRoomMember.builder().room(room).user(order.getRequester()).build());
             memberRepository.save(PurchaseChatRoomMember.builder().room(room).user(order.getRunner()).build());
+            BusinessLog.info(log, "event=PURCHASE_CHAT_ROOM_CREATED orderId={} roomId={} requesterId={} runnerId={}", order.getId(), room.getId(), order.getRequester().getId(), order.getRunner().getId());
             return room;
         });
     }
@@ -70,20 +74,35 @@ public class PurchaseChatService {
     public PurchaseChatMessageResponse sendByOrder(Long userId, Long orderId, String type, String content) {
         PurchaseChatRoom room = getRoomByOrder(orderId);
         PurchaseChatRoomMember member = requireMember(room.getId(), userId);
-        if (isReadOnly(room.getPurchaseOrder())) throw new RuntimeException("聊天室已轉為唯讀");
+        if (isReadOnly(room.getPurchaseOrder())) {
+            log.warn("event=CHAT_SEND_REJECTED actorId={} orderId={} roomId={} reasonCode=READ_ONLY", userId, orderId, room.getId());
+            throw new RuntimeException("聊天室已轉為唯讀");
+        }
         if (content == null || content.isBlank()) throw new RuntimeException("訊息內容不可空白");
         String normalizedType = type == null ? "TEXT" : type.trim().toUpperCase();
         if (!Set.of("TEXT", "IMAGE").contains(normalizedType)) throw new RuntimeException("不支援的訊息類型");
 
-        PurchaseChatMessage saved = messageRepository.save(PurchaseChatMessage.builder()
-                .room(room).sender(member.getUser()).messageType(normalizedType).content(content.trim()).build());
+        PurchaseChatMessage saved;
+        try {
+            saved = messageRepository.save(PurchaseChatMessage.builder()
+                    .room(room).sender(member.getUser()).messageType(normalizedType).content(content.trim()).build());
+        } catch (RuntimeException e) {
+            log.error("event=PURCHASE_CHAT_PERSIST_FAILED actorId={} orderId={} roomId={} errorType={}", userId, orderId, room.getId(), e.getClass().getSimpleName());
+            throw e;
+        }
         room.setUpdatedAt(LocalDateTime.now());
         roomRepository.save(room);
         member.setLastReadMessageId(saved.getId());
         member.setLastReadAt(LocalDateTime.now());
         memberRepository.save(member);
         PurchaseChatMessageResponse response = toMessageResponse(saved);
-        messagingTemplate.convertAndSend("/topic/chat/rooms/" + room.getId(), response);
+        try {
+            messagingTemplate.convertAndSend("/topic/chat/rooms/" + room.getId(), response);
+        } catch (RuntimeException e) {
+            log.error("event=PURCHASE_CHAT_SEND_FAILED actorId={} orderId={} roomId={} messageId={} errorType={}", userId, orderId, room.getId(), saved.getId(), e.getClass().getSimpleName());
+            throw e;
+        }
+        BusinessLog.debug(log, "event=PURCHASE_CHAT_MESSAGE_SAVED actorId={} orderId={} roomId={} messageId={} messageType={}", userId, orderId, room.getId(), saved.getId(), normalizedType);
 
         User counterpart = counterpart(room.getPurchaseOrder(), userId);
         notificationService.sendNotification(counterpart, "PURCHASE_CHAT_MESSAGE", orderId,
@@ -122,7 +141,10 @@ public class PurchaseChatService {
 
     private PurchaseChatRoomMember requireMember(Long roomId, Long userId) {
         return memberRepository.findByRoomIdAndUserId(roomId, userId)
-                .orElseThrow(() -> new RuntimeException("您不是此託購聊天室成員"));
+                .orElseThrow(() -> {
+                    log.warn("event=PURCHASE_CHAT_ACCESS_DENIED actorId={} roomId={} reasonCode=NOT_MEMBER", userId, roomId);
+                    return new RuntimeException("您不是此託購聊天室成員");
+                });
     }
 
     private boolean isReadOnly(PurchaseOrder order) {

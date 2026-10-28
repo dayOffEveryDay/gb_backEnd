@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.response.CreditScoreLogResponse;
 import com.costco.gb.entity.CreditScoreLog;
 import com.costco.gb.entity.User;
@@ -75,7 +76,8 @@ public class CreditScoreService {
 
         creditScoreLogRepository.save(logEntry);
 
-        log.info("會員 {} 信用分異動: {}. 結算: {}", userId, scoreChange, newScore);
+        BusinessLog.info(log, "event=CREDIT_SCORE_CHANGED userId={} campaignId={} creditLogId={} requestedChange={} beforeScore={} afterScore={} actualChange={}",
+                userId, campaignId, logEntry.getId(), scoreChange, currentScore, newScore, newScore - currentScore);
     }
 
     private String resolveSourceType(CreditScoreLog log) {

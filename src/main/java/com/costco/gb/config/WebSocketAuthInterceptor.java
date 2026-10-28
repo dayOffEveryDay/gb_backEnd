@@ -47,17 +47,19 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                     accessor.setUser(userPrincipal);
                     sessionRegistry.register(accessor.getSessionId(), userId);
 
-//                    log.info("WebSocket 連線成功，已綁定使用者 ID: {}", userId);
+                    log.debug("event=WEBSOCKET_CONNECTED actorId={} sessionId={}", userId, accessor.getSessionId());
                 } catch (Exception e) {
-                    log.error("WebSocket JWT 驗證失敗: {}", e.getMessage());
+                    log.warn("event=WEBSOCKET_AUTH_REJECTED sessionId={} reasonCode=INVALID_TOKEN errorType={}", accessor.getSessionId(), e.getClass().getSimpleName());
                     throw new IllegalArgumentException("無效的 Token，拒絕連線！");
                 }
             } else {
+                log.warn("event=WEBSOCKET_AUTH_REJECTED sessionId={} reasonCode=MISSING_TOKEN", accessor.getSessionId());
                 throw new IllegalArgumentException("缺少 Token，拒絕連線！");
             }
         }
         if (StompCommand.DISCONNECT.equals(accessor.getCommand())) {
             sessionRegistry.remove(accessor.getSessionId());
+            log.debug("event=WEBSOCKET_DISCONNECTED sessionId={}", accessor.getSessionId());
         }
         return message;
     }

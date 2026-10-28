@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import lombok.extern.slf4j.Slf4j;
 import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +32,7 @@ public class FileService {
 
     // 上傳聊天室圖片，回傳可由前端直接載入的完整後端網址。
     public List<String> uploadChatImages(List<MultipartFile> files, Long campaignId) {
+        long startedAt = System.nanoTime();
         List<String> uploadedUrls = new ArrayList<>();
 
         try {
@@ -69,9 +71,11 @@ public class FileService {
 
                 String imageUrl = baseUrl + "/" + specificDir + newFilename;
                 uploadedUrls.add(imageUrl);
-                log.info("聊天室檔案已上傳: {}", imageUrl);
+                BusinessLog.warnOnRollback(log, "event=FILE_DB_RECONCILIATION_REQUIRED operation=CHAT_UPLOAD campaignId={} storageKey={}", campaignId, newFilename);
+                log.debug("event=CHAT_FILE_WRITTEN campaignId={} storageKey={} bytes={}", campaignId, newFilename, file.getSize());
             }
 
+            BusinessLog.info(log, "event=CHAT_FILES_UPLOADED campaignId={} count={} totalBytes={} durationMs={}", campaignId, uploadedUrls.size(), files.stream().filter(java.util.Objects::nonNull).mapToLong(MultipartFile::getSize).sum(), (System.nanoTime() - startedAt) / 1_000_000);
             return uploadedUrls;
         } catch (IOException e) {
             log.error("聊天室檔案上傳失敗，campaignId: {}", campaignId, e);
@@ -84,6 +88,7 @@ public class FileService {
         if (files == null || files.isEmpty()) {
             return List.of();
         }
+        long startedAt = System.nanoTime();
         if (files.size() > 3) {
             throw new RuntimeException("問題附圖最多只能上傳 3 張");
         }
@@ -117,7 +122,9 @@ public class FileService {
                         .outputQuality(0.75)
                         .toFile(filePath.toFile());
                 uploadedUrls.add(baseUrl + "/" + INQUIRY_UPLOAD_DIR + newFilename);
+                BusinessLog.warnOnRollback(log, "event=FILE_DB_RECONCILIATION_REQUIRED operation=INQUIRY_UPLOAD storageKey={}", newFilename);
             }
+            BusinessLog.info(log, "event=INQUIRY_IMAGES_UPLOADED count={} totalBytes={} durationMs={}", uploadedUrls.size(), files.stream().mapToLong(MultipartFile::getSize).sum(), (System.nanoTime() - startedAt) / 1_000_000);
             return uploadedUrls;
         } catch (IOException e) {
             log.error("問題附圖上傳失敗", e);

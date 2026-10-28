@@ -1,5 +1,6 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.dto.response.BlockedUserResponse;
 import com.costco.gb.repository.UserFollowRepository;
 import com.costco.gb.entity.Block;
@@ -61,7 +62,7 @@ public class BlockService {
         // 2. 如果我原本有追蹤對方，自動取消追蹤
         userFollowRepository.deleteByFollowerIdAndHostId(currentUserId, targetUserId);
 
-        log.info("User {} 已將 User {} 加入黑名單，並斬斷相關追蹤關係", currentUserId, targetUserId);
+        BusinessLog.info(log, "event=USER_BLOCKED actorId={} targetUserId={} followRelationCleared=true", currentUserId, targetUserId);
     }
 
     // 🌟 解除封鎖
@@ -70,7 +71,7 @@ public class BlockService {
         blockRepository.findByBlockerIdAndBlockedId(currentUserId, targetUserId)
                 .ifPresent(block -> {
                     blockRepository.delete(block);
-                    log.info("User {} 已解除對 User {} 的封鎖", currentUserId, targetUserId);
+                    BusinessLog.info(log, "event=USER_UNBLOCKED actorId={} targetUserId={}", currentUserId, targetUserId);
                 });
     }
     // 🌟 輕量版：撈取我的黑名單

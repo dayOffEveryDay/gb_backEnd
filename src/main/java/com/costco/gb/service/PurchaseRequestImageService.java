@@ -1,9 +1,11 @@
 package com.costco.gb.service;
 
+import com.costco.gb.logging.BusinessLog;
 import com.costco.gb.entity.PurchaseRequest;
 import com.costco.gb.repository.PurchaseQuoteRepository;
 import com.costco.gb.repository.PurchaseRequestRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PurchaseRequestImageService {
@@ -39,6 +42,8 @@ public class PurchaseRequestImageService {
             throw new RuntimeException("託購圖片最多 5 張");
         }
 
+        int originalCount = imageKeys.size();
+        long startedAt = System.nanoTime();
         Path dir = Paths.get("uploads", "purchase-requests", requestId.toString()).toAbsolutePath().normalize();
         try {
             Files.createDirectories(dir);
@@ -57,15 +62,19 @@ public class PurchaseRequestImageService {
                         .outputQuality(0.8)
                         .toFile(dir.resolve(filename).toFile());
                 imageKeys.add("purchase-requests/" + requestId + "/" + filename);
+                BusinessLog.warnOnRollback(log, "event=FILE_DB_RECONCILIATION_REQUIRED operation=UPLOAD actorId={} requestId={} storageKey={} reasonCode=TRANSACTION_NOT_COMMITTED", userId, requestId, "purchase-requests/" + requestId + "/" + filename);
             }
         } catch (RuntimeException e) {
+            log.warn("event=PURCHASE_IMAGE_UPLOAD_REJECTED actorId={} requestId={} requestedCount={} completedCount={} errorType={}", userId, requestId, files.size(), imageKeys.size() - originalCount, e.getClass().getSimpleName());
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("託購圖片上傳失敗");
+            log.error("event=PURCHASE_IMAGE_UPLOAD_FAILED actorId={} requestId={} requestedCount={} completedCount={} errorType={}", userId, requestId, files.size(), imageKeys.size() - originalCount, e.getClass().getSimpleName());
+            throw new RuntimeException("託購圖片上傳失敗", e);
         }
 
         request.setImageUrls(imageKeys);
         requestRepository.save(request);
+        BusinessLog.info(log, "event=PURCHASE_IMAGES_UPLOADED actorId={} requestId={} count={} totalBytes={} durationMs={}", userId, requestId, files.size(), files.stream().mapToLong(MultipartFile::getSize).sum(), (System.nanoTime() - startedAt) / 1_000_000);
         return toPublicImageUrls(imageKeys);
     }
 
@@ -86,13 +95,19 @@ public class PurchaseRequestImageService {
             if (!target.startsWith(base)) {
                 throw new RuntimeException("圖片路徑不合法");
             }
-            Files.deleteIfExists(target);
+            boolean deleted = Files.deleteIfExists(target);
+            log.debug("event=PURCHASE_IMAGE_FILE_DELETE actorId={} requestId={} fileExisted={}", userId, requestId, deleted);
+            if (deleted) {
+                BusinessLog.warnOnRollback(log, "event=FILE_DB_RECONCILIATION_REQUIRED operation=DELETE actorId={} requestId={} storageKey={} reasonCode=TRANSACTION_NOT_COMMITTED", userId, requestId, imageKey);
+            }
         } catch (Exception e) {
-            throw new RuntimeException("刪除圖片失敗");
+            log.error("event=PURCHASE_IMAGE_DELETE_FAILED actorId={} requestId={} errorType={}", userId, requestId, e.getClass().getSimpleName());
+            throw new RuntimeException("刪除圖片失敗", e);
         }
 
         request.setImageUrls(imageKeys);
         requestRepository.save(request);
+        BusinessLog.info(log, "event=PURCHASE_IMAGE_DELETED actorId={} requestId={} remainingCount={}", userId, requestId, imageKeys.size());
         return toPublicImageUrls(imageKeys);
     }
 
@@ -107,6 +122,7 @@ public class PurchaseRequestImageService {
 
         request.setImageUrls(new ArrayList<>(requested));
         requestRepository.save(request);
+        BusinessLog.info(log, "event=PURCHASE_IMAGES_REORDERED actorId={} requestId={} count={}", userId, requestId, requested.size());
         return toPublicImageUrls(request.getImageUrls());
     }
 
