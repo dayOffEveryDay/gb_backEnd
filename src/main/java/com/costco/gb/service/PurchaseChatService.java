@@ -92,9 +92,6 @@ public class PurchaseChatService {
         }
         room.setUpdatedAt(LocalDateTime.now());
         roomRepository.save(room);
-        member.setLastReadMessageId(saved.getId());
-        member.setLastReadAt(LocalDateTime.now());
-        memberRepository.save(member);
         PurchaseChatMessageResponse response = toMessageResponse(saved);
         try {
             messagingTemplate.convertAndSend("/topic/chat/rooms/" + room.getId(), response);
@@ -118,13 +115,13 @@ public class PurchaseChatService {
     }
 
     @Transactional
-    public void markRead(Long userId, Long roomId) {
-        PurchaseChatRoomMember member = requireMember(roomId, userId);
-        Long lastId = messageRepository.findFirstByRoomIdOrderByIdDesc(roomId)
-                .map(PurchaseChatMessage::getId).orElse(0L);
-        member.setLastReadMessageId(lastId);
-        member.setLastReadAt(LocalDateTime.now());
-        memberRepository.save(member);
+    public void markRead(Long userId, Long roomId, Long messageId) {
+        requireMember(roomId, userId);
+        if (messageId == null || messageId <= 0
+                || !messageRepository.existsByIdAndRoomId(messageId, roomId)) {
+            throw new IllegalArgumentException("已讀訊息不存在或不屬於此聊天室");
+        }
+        memberRepository.advanceRead(roomId, userId, messageId);
     }
 
     @Transactional(readOnly = true)

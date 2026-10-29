@@ -8,6 +8,7 @@ import java.util.List;
 @Data
 @Builder
 public class CampaignSummaryResponse {
+    private long unreadCount;
     private Long id;
     private String itemName;
     private List<String> imageUrls;

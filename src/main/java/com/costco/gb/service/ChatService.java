@@ -19,6 +19,26 @@ public class ChatService {
     private final CampaignRepository campaignRepository;
     private final UserRepository userRepository;
     private final CampaignChatAccessService chatAccessService;
+    private final ChatReadStateRepository chatReadStateRepository;
+
+    @Transactional
+    public long markRead(Long userId, Long campaignId, Long messageId) {
+        chatAccessService.requireReadable(campaignId, userId);
+        if (messageId == null || messageId <= 0
+                || !chatMessageRepository.existsByIdAndCampaignId(messageId, campaignId)) {
+            throw new IllegalArgumentException("已讀訊息不存在或不屬於此聊天室");
+        }
+        chatReadStateRepository.advance(campaignId, userId, messageId);
+        return chatMessageRepository.countUnread(campaignId, userId);
+    }
+
+    @Transactional(readOnly = true)
+    public long getUnreadCount(Long userId, Campaign campaign) {
+        if (chatAccessService.getAccessLevel(campaign, userId) == CampaignChatAccessService.AccessLevel.NONE) {
+            return 0;
+        }
+        return chatMessageRepository.countUnread(campaign.getId(), userId);
+    }
 
     @Transactional
     public ChatMessageResponse saveMessage(Long senderId, Long campaignId, ChatMessageRequest request) {
@@ -45,6 +65,7 @@ public class ChatService {
         BusinessLog.debug(log, "event=CAMPAIGN_CHAT_MESSAGE_SAVED actorId={} campaignId={} messageId={} messageType=TEXT", senderId, campaignId, message.getId());
 
         return ChatMessageResponse.builder()
+                .messageId(message.getId())
                 .senderId(sender.getId())
                 .senderName(sender.getDisplayName() != null ? sender.getDisplayName() : "匿名會員")
                 .content(message.getContent())
@@ -67,6 +88,7 @@ public class ChatService {
         // 將 Entity 轉換成前端要的 DTO 格式
         return messages.stream()
                 .map(msg -> ChatMessageResponse.builder()
+                        .messageId(msg.getId())
                         .senderId(msg.getSender().getId())
                         .senderName(msg.getSender().getDisplayName() != null ? msg.getSender().getDisplayName() : "匿名會員")
                         .avatarUrl(msg.getSender().getProfileImageUrl())

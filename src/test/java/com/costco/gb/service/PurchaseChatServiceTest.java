@@ -58,4 +58,29 @@ class PurchaseChatServiceTest {
 
         assertThrows(RuntimeException.class, () -> service.sendByOrder(1L, 20L, "TEXT", "test"));
     }
+
+    @Test
+    void markRead_AdvancesOnlyToDisplayedMessage() {
+        when(memberRepository.findByRoomIdAndUserId(30L, 1L))
+                .thenReturn(Optional.of(new PurchaseChatRoomMember()));
+        when(messageRepository.existsByIdAndRoomId(40L, 30L)).thenReturn(true);
+        service.markRead(1L, 30L, 40L);
+        verify(memberRepository).advanceRead(30L, 1L, 40L);
+        verify(messageRepository, never()).findFirstByRoomIdOrderByIdDesc(anyLong());
+    }
+
+    @Test
+    void markRead_RejectsForeignMessageOrMissingCursor() {
+        when(memberRepository.findByRoomIdAndUserId(30L, 1L))
+                .thenReturn(Optional.of(new PurchaseChatRoomMember()));
+        assertThrows(IllegalArgumentException.class, () -> service.markRead(1L, 30L, 99L));
+        assertThrows(IllegalArgumentException.class, () -> service.markRead(1L, 30L, null));
+        verify(memberRepository, never()).advanceRead(anyLong(), anyLong(), anyLong());
+    }
+
+    @Test
+    void markRead_RejectsNonMember() {
+        assertThrows(RuntimeException.class, () -> service.markRead(1L, 30L, 40L));
+        verify(memberRepository, never()).advanceRead(anyLong(), anyLong(), anyLong());
+    }
 }

@@ -1,6 +1,7 @@
 package com.costco.gb.controller;
 
 import com.costco.gb.dto.request.PurchaseChatSendRequest;
+import com.costco.gb.dto.request.ChatReadRequest;
 import com.costco.gb.dto.response.PurchaseChatRoomResponse;
 import com.costco.gb.service.PurchaseChatService;
 import jakarta.validation.Valid;
@@ -29,8 +30,9 @@ public class PurchaseChatController {
     }
 
     @PostMapping("/{roomId}/read")
-    public ResponseEntity<Void> read(Authentication auth, @PathVariable Long roomId) {
-        chatService.markRead(userId(auth), roomId);
+    public ResponseEntity<Void> read(Authentication auth, @PathVariable Long roomId,
+                                     @Valid @RequestBody ChatReadRequest request) {
+        chatService.markRead(userId(auth), roomId, request.getLastReadMessageId());
         return ResponseEntity.noContent().build();
     }
 

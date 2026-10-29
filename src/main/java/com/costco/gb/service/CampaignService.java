@@ -46,6 +46,7 @@ public class CampaignService {
     private final CampaignMapper campaignMapper;
     private final CreditScoreService creditScoreService;
     private final CampaignChatAccessService campaignChatAccessService;
+    private final ChatService chatService;
 
 
     // 圖片完整網址使用的服務基底 URL
@@ -213,7 +214,11 @@ public class CampaignService {
         Page<Campaign> campaigns = campaignRepository.findByHostIdOrderByCreatedAtDesc(userId, pageable);
 
         // 將 Entity 轉換成包含完整圖片網址的回傳 DTO
-        return campaigns.map(campaignMapper::toSummaryResponse);
+        return campaigns.map(campaign -> {
+            CampaignSummaryResponse response = campaignMapper.toSummaryResponse(campaign);
+            response.setUnreadCount(chatService.getUnreadCount(userId, campaign));
+            return response;
+        });
     }
 
     // 🌟 查詢我參與的合購單
@@ -222,7 +227,11 @@ public class CampaignService {
         Page<Campaign> campaigns = campaignRepository.findJoinedCampaignsByUserId(userId, pageable);
 
         // 將 Entity 轉換成前端需要的 DTO
-        return campaigns.map(campaign -> campaignMapper.toSummaryResponse(campaign, userId));
+        return campaigns.map(campaign -> {
+            CampaignSummaryResponse response = campaignMapper.toSummaryResponse(campaign, userId);
+            response.setUnreadCount(chatService.getUnreadCount(userId, campaign));
+            return response;
+        });
     }
     // 輔助方法：Entity 轉 DTO
 //    private CampaignSummaryResponse mapToSummaryResponse(Campaign campaign) {

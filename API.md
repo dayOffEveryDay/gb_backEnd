@@ -2,6 +2,20 @@
 
 本文件整理 `gb_backEnd` 目前提供的 REST API 與 WebSocket/STOMP 介面。
 
+## 聊天室已讀進度
+
+合購沿用現有 `chat_read_states` 表，依 `(campaign_id, user_id)` 保存團主與團員進度，首次標記時建立資料。未建立進度或 `last_read_message_id` 為 NULL 時，所有其他人發送的訊息均視為未讀；自己的訊息不計入未讀數。
+
+- 歷史訊息與 STOMP 廣播的 `ChatMessageResponse` 都包含 `messageId`。
+- 我的發起／參與合購列表在各筆摘要中回傳 `unreadCount`，不可閱讀的聊天室回傳 0。
+- `POST /api/v1/campaigns/{campaignId}/chat-messages/read` 接收 `{"lastReadMessageId": 123}`，回傳 `200` 與 `{"unreadCount": 2}`。
+- 合購標記已讀使用閱讀權限，包含唯讀成員；主動退出、被踢除或非成員不能更新。
+- 合購與託購的已讀 ID 必須為正整數，且屬於指定聊天室；缺少或無效 ID 回傳 `400`。重複或較舊的 ID 不會倒退已讀進度。
+- 前端在聊天室訊息渲染且分頁可見後提交實際讀到的最大 ID；開啟導覽、發送訊息本身不會自動標記資料庫最新訊息。
+- 此進度與小鈴鐺通知的已讀狀態分開保存，現有通知流程維持原狀。
+
+託購已讀 API 現在也必須傳入相同格式的 body，需同步更新前端部署。瀏覽器舊有的合購已讀時間不會匯入後端；首次使用新流程時，依後端進度計算未讀數。
+
 ## 基本資訊
 
 - Base URL: `http://localhost:8080`
@@ -478,6 +492,7 @@ Response: `Page<CreditScoreLogResponse>`
 | Method | Path | Auth | 說明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/campaigns/{campaignId}/chat-messages` | Yes | 取得團購聊天室歷史訊息 |
+| `POST` | `/api/v1/campaigns/{campaignId}/chat-messages/read` | Yes | 提交實際已讀訊息 ID，回傳剩餘未讀數 |
 | `POST` | `/api/v1/files/upload` | Yes | 上傳聊天室圖片 |
 
 上傳圖片 request:
@@ -1488,7 +1503,7 @@ Response: `200 OK`，`PurchaseOrderEventResponse[]`，依建立時間由舊到�
 
 - `GET /api/v1/purchase-chat-rooms`: 我的聊天室清單，包含對方、最後訊息、未讀數與唯讀狀態。
 - `GET /api/v1/purchase-chat-rooms/unread-count`: 所有託購聊天室未讀總數。
-- `POST /api/v1/purchase-chat-rooms/{roomId}/read`: 將聊天室標記已讀，response `204`。
+- `POST /api/v1/purchase-chat-rooms/{roomId}/read`: 提交實際已讀訊息 ID，response `204`。必須傳入 `{"lastReadMessageId": 123}`，不再自動標記到資料庫最新訊息。
 - `POST /api/v1/purchase-chat-rooms/{roomId}/messages`: 發送文字或圖片 URL。
 - `GET /api/v1/purchase-orders/{orderId}/messages`: 訂單聊天室歷史訊息。
 - `POST /api/v1/purchase-orders/{orderId}/messages`: 發送文字訊息。
