@@ -1,4 +1,6 @@
 spring:
+  main:
+    banner-mode: "off"
   application:
     name: gb-backend
 
@@ -48,9 +50,6 @@ logging:
   level:
     com.costco.gb: DEBUG
     org.springframework.security: INFO
-  pattern:
-    # 自訂 Log 格式，加入 [%X{traceId}]
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%15.15t] [%X{traceId}] %-40.40logger{39} : %m%n"
 app:
   share:
     campaign-detail-path: ${CAMPAIGN_DETAIL_PATH:/campaigns/{id}}

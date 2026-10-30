@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <springProperty scope="context" name="serviceName" source="spring.application.name" defaultValue="gb-backend"/>
+    <!-- 所有環境與第三方套件共用單行 JSON，避免文字前綴與多行堆疊干擾收集。 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="com.costco.gb.logging.JsonLogEncoder">
+            <serviceName>${serviceName}</serviceName>
+        </encoder>
+    </appender>
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
